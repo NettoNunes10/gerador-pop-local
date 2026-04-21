@@ -151,18 +151,25 @@ def get_library(
         params + [limit, offset]
     ).fetchall()
 
+    import urllib.parse
+
     items = []
     for r in rows:
-        # Gera o caminho relativo para o player estático
-        full_path = r[8]
-        rel_path = os.path.relpath(full_path, music_root).replace('\\', '/')
-        
-        items.append({
-            "id": r[0], "nome": r[1], "artista": r[2],
-            "categoria": r[3], "bpm": r[4], "peso": r[5],
-            "sub_categoria": r[6], "data_arquivo": r[7],
-            "url": f"/music_files/{rel_path}"
-        })
+        try:
+            # Gera o caminho relativo para o player estático
+            full_path = r[8]
+            rel_path = os.path.relpath(full_path, music_root)
+            
+            # Codifica a URL para suportar espaços e acentos
+            encoded_rel = urllib.parse.quote(rel_path.replace('\\', '/'))
+            
+            items.append({
+                "id": r[0], "nome": r[1], "artista": r[2],
+                "categoria": r[3], "bpm": r[4], "peso": r[5],
+                "sub_categoria": r[6], "data_arquivo": r[7],
+                "url": f"/music_files/{encoded_rel}"
+            })
+        except: continue
 
     return {
         "items": items,
