@@ -124,8 +124,7 @@ async def run_sync_task():
     state.logs = []
     add_log("🚀 Iniciando Sincronização Geral da Biblioteca...")
     try:
-        engine = PlaylistEngine()
-        engine.logger_callback = add_log
+        engine = PlaylistEngine(log_callback=add_log)
         music_root = config.get_path('MUSIC_ROOT')
         if not os.path.exists(music_root):
             add_log(f"❌ Erro: Raiz de músicas não encontrada em {music_root}")
