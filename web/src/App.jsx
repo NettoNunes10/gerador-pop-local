@@ -57,17 +57,46 @@ function App() {
 
   const API_URL = `http://${window.location.hostname}:8000`
 
+  // Helper: fetch com timeout de 3s para nunca bloquear
+  const safeFetch = async (url, options = {}) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal })
+      clearTimeout(timeout)
+      return res
+    } catch (e) {
+      clearTimeout(timeout)
+      throw e
+    }
+  }
+
   useEffect(() => {
     fetchStatus()
     fetchConfig()
     fetchLibrary({ page: 1 })
     fetchStats()
     fetchTemplates()
-    const interval = setInterval(() => {
-      fetchLogs()
-      fetchStatus()
-    }, 2000)
-    return () => clearInterval(interval)
+
+    // Polling inteligente: só agenda novo poll APÓS o anterior terminar
+    let cancelled = false
+    const poll = async () => {
+      if (cancelled) return
+      try {
+        const res = await safeFetch(`${API_URL}/logs`)
+        const data = await res.json()
+        setLogs(data.logs)
+      } catch (e) { }
+      try {
+        const res = await safeFetch(`${API_URL}/status`)
+        const data = await res.json()
+        setSystemStatus(data)
+        setIsBusy(data.is_busy)
+      } catch (e) { }
+      if (!cancelled) setTimeout(poll, 2000)
+    }
+    setTimeout(poll, 2000)
+    return () => { cancelled = true }
   }, [])
 
   // Debounce: busca no backend 400ms após parar de digitar
@@ -90,7 +119,7 @@ function App() {
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`${API_URL}/status`)
+      const res = await safeFetch(`${API_URL}/status`)
       const data = await res.json()
       setSystemStatus(data)
       setIsBusy(data.is_busy)
@@ -99,7 +128,7 @@ function App() {
 
   const fetchTemplates = async () => {
     try {
-      const res = await fetch(`${API_URL}/templates`)
+      const res = await safeFetch(`${API_URL}/templates`)
       const data = await res.json()
       setAvailableTemplates(data)
     } catch (e) { }
@@ -107,7 +136,7 @@ function App() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch(`${API_URL}/config`)
+      const res = await safeFetch(`${API_URL}/config`)
       const data = await res.json()
       setEditablePaths(data.paths || {})
       setFavoriteArtists(data.favorite_artists || [])
@@ -129,7 +158,7 @@ function App() {
       if (opts.group    ?? filterGroup)    params.set('group',    opts.group    ?? filterGroup)
       if (opts.bpm      ?? bpmEnergy)      params.set('bpm',      opts.bpm      ?? bpmEnergy)
       if (opts.sort     ?? sortBy)         params.set('sort',     opts.sort     ?? sortBy)
-      const res = await fetch(`${API_URL}/library?${params}`)
+      const res = await safeFetch(`${API_URL}/library?${params}`)
       const data = await res.json()
       setLibrary(data.items)
       setLibTotal(data.total)
@@ -141,17 +170,9 @@ function App() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/stats`)
+      const res = await safeFetch(`${API_URL}/stats`)
       const data = await res.json()
       setStats(data)
-    } catch (e) { }
-  }
-
-  const fetchLogs = async () => {
-    try {
-      const res = await fetch(`${API_URL}/logs`)
-      const data = await res.json()
-      setLogs(data.logs)
     } catch (e) { }
   }
 

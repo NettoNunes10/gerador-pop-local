@@ -227,7 +227,9 @@ def batch_update_library(data: dict = Body(...)):
     return {"status": "no_change"}
 
 
-# --- Tasks de Segundo Plano ---
+# --- Tasks de Segundo Plano (Thread Dedicada) ---
+
+import threading
 
 def run_generation_task(start_date_str: str, days: int):
     state.is_busy = True
@@ -273,17 +275,19 @@ def run_sync_task():
         state.is_busy = False
 
 @app.post("/generate")
-async def start_generation(req: GenerateRequest, background_tasks: BackgroundTasks):
+async def start_generation(req: GenerateRequest):
     if state.is_busy:
         raise HTTPException(status_code=400, detail="O sistema está ocupado.")
-    background_tasks.add_task(run_generation_task, req.start_date, req.days)
+    t = threading.Thread(target=run_generation_task, args=(req.start_date, req.days), daemon=True)
+    t.start()
     return {"status": "started"}
 
 @app.post("/sync")
-async def start_sync(background_tasks: BackgroundTasks):
+async def start_sync():
     if state.is_busy:
         raise HTTPException(status_code=400, detail="O sistema está ocupado.")
-    background_tasks.add_task(run_sync_task)
+    t = threading.Thread(target=run_sync_task, daemon=True)
+    t.start()
     return {"status": "started"}
 
 if __name__ == "__main__":
