@@ -18,6 +18,11 @@ function App() {
   const [dayTemplates, setDayTemplates] = useState({})
   const [availableTemplates, setAvailableTemplates] = useState([])
   const [library, setLibrary] = useState([])
+  const [libTotal, setLibTotal] = useState(0)
+  const [libPage, setLibPage] = useState(1)
+  const [libPages, setLibPages] = useState(1)
+  const [libLoading, setLibLoading] = useState(false)
+  const LIB_LIMIT = 100
   const [stats, setStats] = useState({ categories: [], top_artists: [] })
   const [logs, setLogs] = useState([])
   const [isBusy, setIsBusy] = useState(false)
@@ -55,7 +60,7 @@ function App() {
   useEffect(() => {
     fetchStatus()
     fetchConfig()
-    fetchLibrary()
+    fetchLibrary({ page: 1 })
     fetchStats()
     fetchTemplates()
     const interval = setInterval(() => {
@@ -64,6 +69,19 @@ function App() {
     }, 2000)
     return () => clearInterval(interval)
   }, [])
+
+  // Debounce: busca no backend 400ms após parar de digitar
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchLibrary({ page: 1, search: searchTerm })
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  // Filtros imediatos (dropdowns)
+  useEffect(() => {
+    fetchLibrary({ page: 1 })
+  }, [filterCategory, filterGroup, bpmEnergy, sortBy])
 
   useEffect(() => {
     const el = logContainerRef.current
@@ -100,12 +118,25 @@ function App() {
     } catch (e) { }
   }
 
-  const fetchLibrary = async () => {
+  const fetchLibrary = async (opts = {}) => {
+    setLibLoading(true)
     try {
-      const res = await fetch(`${API_URL}/library`)
+      const params = new URLSearchParams()
+      params.set('page', opts.page ?? libPage)
+      params.set('limit', LIB_LIMIT)
+      if (opts.search  ?? searchTerm)  params.set('search',   opts.search  ?? searchTerm)
+      if (opts.category ?? filterCategory) params.set('category', opts.category ?? filterCategory)
+      if (opts.group    ?? filterGroup)    params.set('group',    opts.group    ?? filterGroup)
+      if (opts.bpm      ?? bpmEnergy)      params.set('bpm',      opts.bpm      ?? bpmEnergy)
+      if (opts.sort     ?? sortBy)         params.set('sort',     opts.sort     ?? sortBy)
+      const res = await fetch(`${API_URL}/library?${params}`)
       const data = await res.json()
-      setLibrary(data)
+      setLibrary(data.items)
+      setLibTotal(data.total)
+      setLibPage(data.page)
+      setLibPages(data.pages)
     } catch (e) { }
+    finally { setLibLoading(false) }
   }
 
   const fetchStats = async () => {
@@ -256,35 +287,14 @@ function App() {
   }
 
   const toggleSelectAll = () => {
-    if (selectedTracks.size === filteredLibrary.length) {
+    if (selectedTracks.size === library.length) {
       setSelectedTracks(new Set())
     } else {
-      setSelectedTracks(new Set(filteredLibrary.map(t => t.id)))
+      setSelectedTracks(new Set(library.map(t => t.id)))
     }
   }
 
-  // Filter + Sort Logic
-  const filteredLibrary = library
-    .filter(track => {
-      const matchesSearch = (track.artista || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            (track.nome || "").toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesCategory = filterCategory === '' || track.categoria === filterCategory
-      const matchesGroup = filterGroup === '' || track.sub_categoria === filterGroup
-      
-      let matchesBpm = true
-      if (bpmEnergy === 'L') matchesBpm = track.bpm < 80
-      if (bpmEnergy === 'M') matchesBpm = track.bpm >= 80 && track.bpm <= 120
-      if (bpmEnergy === 'H') matchesBpm = track.bpm > 120
-      
-      return matchesSearch && matchesCategory && matchesBpm && matchesGroup
-    })
-    .sort((a, b) => {
-      if (sortBy === 'artista') return (a.artista || '').localeCompare(b.artista || '', 'pt-BR')
-      if (sortBy === 'nome') return (a.nome || '').localeCompare(b.nome || '', 'pt-BR')
-      if (sortBy === 'data_desc') return (b.data_arquivo || '').localeCompare(a.data_arquivo || '')
-      if (sortBy === 'data_asc') return (a.data_arquivo || '').localeCompare(b.data_arquivo || '')
-      return 0
-    })
+  // Dados já filtrados/ordenados pelo backend — library é a página atual
 
   const addArtist = () => {
     const artist = prompt("Nome do Artista:")
@@ -422,7 +432,7 @@ function App() {
   const renderLibrary = () => (
     <div className="glass card">
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '1rem', flexWrap: 'wrap'}}>
-        <h2 className="card-title" style={{margin: 0}}><Database size={20}/> Biblioteca ({filteredLibrary.length})</h2>
+        <h2 className="card-title" style={{margin: 0}}><Database size={20}/> Biblioteca ({libTotal.toLocaleString('pt-BR')} músicas)</h2>
         
         <div style={{display: 'flex', gap: '1rem', flex: 1, minWidth: '400px'}}>
           <div style={{position: 'relative', flex: 1}}>
@@ -472,6 +482,7 @@ function App() {
             <option value="nome">Música (A→Z)</option>
             <option value="data_desc">Mais Recente</option>
             <option value="data_asc">Mais Antiga</option>
+            <option value="peso_desc">Maior Peso</option>
           </select>
         </div>
 
@@ -507,7 +518,7 @@ function App() {
         <table className="lib-table" style={{tableLayout: 'fixed'}}>
           <thead>
             <tr style={{background: 'none'}}>
-              <th style={{width: '40px', padding: '1rem'}}><input type="checkbox" onChange={toggleSelectAll} checked={selectedTracks.size === filteredLibrary.length && filteredLibrary.length > 0}/></th>
+              <th style={{width: '40px', padding: '1rem'}}><input type="checkbox" onChange={toggleSelectAll} checked={selectedTracks.size === library.length && library.length > 0}/></th>
               <th style={{width: '55px', textAlign: 'left', padding: '1rem'}}>PLAY</th>
               <th style={{width: '170px', textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
               <th style={{textAlign: 'left', padding: '1rem'}}>MÚSICA</th>
@@ -518,7 +529,7 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {filteredLibrary.map((track) => (
+            {library.map((track) => (
               <tr key={track.id} style={{background: selectedTracks.has(track.id) ? 'rgba(188,19,254,0.08)' : undefined}}>
                 <td><input type="checkbox" checked={selectedTracks.has(track.id)} onChange={() => toggleTrackSelection(track.id)}/></td>
                 <td>
@@ -555,11 +566,45 @@ function App() {
             ))}
           </tbody>
         </table>
-        {filteredLibrary.length === 0 && (
+        {library.length === 0 && !libLoading && (
           <div style={{textAlign: 'center', padding: '3rem', opacity: 0.5}}>
             Nenhuma música encontrada com os filtros atuais.
           </div>
         )}
+        {libLoading && (
+          <div style={{textAlign: 'center', padding: '2rem', opacity: 0.5}}>
+            <RefreshCw size={20} className="pulse"/> Carregando...
+          </div>
+        )}
+      </div>
+
+      {/* Controles de Paginação */}
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', flexWrap: 'wrap', gap: '1rem'}}>
+        <span style={{fontSize: '0.8rem', opacity: 0.5}}>
+          Página {libPage} de {libPages} · {libTotal.toLocaleString('pt-BR')} músicas no total
+        </span>
+        <div style={{display: 'flex', gap: '0.5rem'}}>
+          <button
+            onClick={() => { const p = Math.max(1, libPage - 1); setLibPage(p); fetchLibrary({ page: p }) }}
+            disabled={libPage <= 1}
+            style={{padding: '0.4rem 0.9rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', cursor: libPage <= 1 ? 'not-allowed' : 'pointer', opacity: libPage <= 1 ? 0.4 : 1}}
+          >← Anterior</button>
+          {Array.from({ length: Math.min(5, libPages) }, (_, i) => {
+            const start = Math.max(1, Math.min(libPage - 2, libPages - 4))
+            const p = start + i
+            return (
+              <button key={p} onClick={() => { setLibPage(p); fetchLibrary({ page: p }) }}
+                style={{padding: '0.4rem 0.8rem', borderRadius: '6px', border: `1px solid ${p === libPage ? 'var(--accent-color)' : 'rgba(255,255,255,0.1)'}`, background: p === libPage ? 'rgba(0,242,255,0.1)' : 'rgba(255,255,255,0.05)', cursor: 'pointer', fontWeight: p === libPage ? 700 : 400, color: p === libPage ? 'var(--accent-color)' : 'inherit'}}>
+                {p}
+              </button>
+            )
+          })}
+          <button
+            onClick={() => { const p = Math.min(libPages, libPage + 1); setLibPage(p); fetchLibrary({ page: p }) }}
+            disabled={libPage >= libPages}
+            style={{padding: '0.4rem 0.9rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', cursor: libPage >= libPages ? 'not-allowed' : 'pointer', opacity: libPage >= libPages ? 0.4 : 1}}
+          >Próxima →</button>
+        </div>
       </div>
     </div>
   )

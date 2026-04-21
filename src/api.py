@@ -119,21 +119,74 @@ def stream_audio(track_id: int):
         add_log(f"❌ Falha ao copiar para streaming local: {e}")
         raise HTTPException(status_code=500, detail="Erro ao preparar áudio")
 
+from typing import Optional
+
 @app.get("/library")
-def get_library():
-    cursor = db.conn.execute("SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca ORDER BY artista ASC")
-    return [
-        {
-            "id": r[0], 
-            "nome": r[1], 
-            "artista": r[2], 
-            "categoria": r[3], 
-            "bpm": r[4],
-            "peso": r[5],
-            "sub_categoria": r[6],
-            "data_arquivo": r[7]
-        } for r in cursor.fetchall()
-    ]
+def get_library(
+    page: int = 1,
+    limit: int = 100,
+    search: Optional[str] = None,
+    category: Optional[str] = None,
+    group: Optional[str] = None,
+    bpm: Optional[str] = None,
+    sort: str = "artista"
+):
+    # Construção dinâmica da query com filtros
+    conditions = []
+    params = []
+
+    if search:
+        conditions.append("(LOWER(artista) LIKE ? OR LOWER(nome_musica) LIKE ?)")
+        term = f"%{search.lower()}%"
+        params.extend([term, term])
+    if category:
+        conditions.append("pasta_categoria = ?")
+        params.append(category)
+    if group:
+        conditions.append("sub_categoria = ?")
+        params.append(group)
+    if bpm == "L":
+        conditions.append("bpm < 80")
+    elif bpm == "M":
+        conditions.append("bpm >= 80 AND bpm <= 120")
+    elif bpm == "H":
+        conditions.append("bpm > 120")
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    # Mapeamento de colunas para ordenação
+    sort_map = {
+        "artista": "artista ASC",
+        "nome": "nome_musica ASC",
+        "data_desc": "data_arquivo DESC NULLS LAST",
+        "data_asc": "data_arquivo ASC NULLS LAST",
+        "peso_desc": "peso_especifico DESC",
+    }
+    order = sort_map.get(sort, "artista ASC")
+
+    # Total de registros (para paginação)
+    count_row = db.conn.execute(f"SELECT COUNT(*) FROM biblioteca {where}", params).fetchone()
+    total = count_row[0]
+
+    # Registros da página
+    offset = (page - 1) * limit
+    rows = db.conn.execute(
+        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
+        params + [limit, offset]
+    ).fetchall()
+
+    return {
+        "items": [
+            {
+                "id": r[0], "nome": r[1], "artista": r[2],
+                "categoria": r[3], "bpm": r[4], "peso": r[5],
+                "sub_categoria": r[6], "data_arquivo": r[7]
+            } for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "pages": max(1, -(-total // limit))  # ceil division
+    }
 
 @app.put("/library/{track_id}")
 def update_track_metadata(track_id: int, data: dict = Body(...)):
