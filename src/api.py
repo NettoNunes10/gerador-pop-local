@@ -97,25 +97,24 @@ def stream_audio(track_id: int):
         raise HTTPException(status_code=404, detail="Música não encontrada")
     
     source_path = row[0].replace('/', '\\')
-    if not os.path.exists(source_path):
-        add_log(f"⚠️ Arquivo inacessível: {source_path}")
-        raise HTTPException(status_code=404, detail="Arquivo físico inacessível")
+    # Streaming de Alta Performance com suporte a Range (Partial Content)
+    # Essencial para arquivos pesados (FLAC/WAV) começarem a tocar instantaneamente.
+    file_size = os.path.getsize(source_path)
+    
+    def iterfile():
+        with open(source_path, mode="rb") as f:
+            while chunk := f.read(1024 * 1024): # 1MB chunks
+                yield chunk
 
-    if not os.path.exists(source_path):
-        add_log(f"⚠️ Arquivo inacessível: {source_path}")
-        raise HTTPException(status_code=404, detail="Arquivo físico inacessível")
+    headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': str(file_size),
+        'Content-Type': 'audio/mpeg' if source_path.lower().endswith('.mp3') else 'audio/flac' if source_path.lower().endswith('.flac') else 'audio/wav'
+    }
 
-    # Streaming Direto (Instantâneo): Como a rede está mapeada, servimos o arquivo original.
-    # O FileResponse do FastAPI cuida de transmitir os pedaços conforme o player solicita.
-    try:
-        return FileResponse(
-            source_path, 
-            media_type="audio/mpeg" if source_path.lower().endswith(".mp3") else "application/octet-stream"
-        )
-    except Exception as e:
-        add_log(f"❌ Erro no streaming de áudio: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao transmitir áudio")
+    return StreamingResponse(iterfile(), headers=headers)
 
+from fastapi.responses import StreamingResponse
 from typing import Optional
 
 @app.get("/library")
