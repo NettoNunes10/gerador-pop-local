@@ -156,12 +156,12 @@ def get_library(
     items = []
     for r in rows:
         try:
-            # Gera o caminho relativo para o player estático
             full_path = r[8]
-            rel_path = os.path.relpath(full_path, music_root)
+            # Normaliza e gera caminho relativo
+            rel_path = os.path.relpath(full_path, music_root).replace('\\', '/')
             
-            # Codifica a URL para suportar espaços e acentos
-            encoded_rel = urllib.parse.quote(rel_path.replace('\\', '/'))
+            # Codifica espaços e acentos, mas MANTÉM as barras /
+            encoded_rel = urllib.parse.quote(rel_path, safe='/')
             
             items.append({
                 "id": r[0], "nome": r[1], "artista": r[2],
@@ -169,7 +169,8 @@ def get_library(
                 "sub_categoria": r[6], "data_arquivo": r[7],
                 "url": f"/music_files/{encoded_rel}"
             })
-        except: continue
+        except Exception as e:
+            continue
 
     return {
         "items": items,
