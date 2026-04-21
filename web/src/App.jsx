@@ -250,26 +250,23 @@ function App() {
 
   const GROUP_COLORS = { TOP: '#bc13fe', HIT: '#ffaa00', STD: '#00f2ff', OLD: '#666' }
 
-  const playTrack = async (track) => {
+  const playTrack = (track) => {
     setCurrentTrack(track)
     setIsPlayerLoading(true)
-    if (audioUrl) URL.revokeObjectURL(audioUrl)
     
-    try {
-      const res = await fetch(`${API_URL}/stream/${track.id}`)
-      if (!res.ok) throw new Error("Falha no acesso ao arquivo de rede")
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      setAudioUrl(url)
-      if (audioRef.current) {
-        audioRef.current.src = url
-        audioRef.current.play()
-      }
-    } catch (e) {
-      console.error("Erro no player:", e)
-      alert("Erro ao carregar áudio. Verifique se a rede está acessível.")
-    } finally {
-      setIsPlayerLoading(false)
+    // Agora usamos a URL direta servida pelo StaticFiles
+    // Isso é instantâneo pois o navegador gerencia o streaming nativamente
+    const directUrl = `${API_URL}${track.url}`
+    
+    if (audioRef.current) {
+      audioRef.current.src = directUrl
+      audioRef.current.load() // Força o carregamento do novo source
+      audioRef.current.play()
+        .then(() => setIsPlayerLoading(false))
+        .catch(e => {
+          console.error("Erro ao dar play:", e)
+          setIsPlayerLoading(false)
+        })
     }
   }
 

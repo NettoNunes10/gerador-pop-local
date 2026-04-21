@@ -88,34 +88,14 @@ def get_stats():
 
 import shutil
 
-@app.get("/stream/{track_id}")
-def stream_audio(track_id: int):
-    cursor = db.conn.cursor()
-    cursor.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (track_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Música não encontrada")
-    
-    source_path = row[0].replace('/', '\\')
-    # Streaming de Alta Performance com suporte a Range (Partial Content)
-    # Essencial para arquivos pesados (FLAC/WAV) começarem a tocar instantaneamente.
-    file_size = os.path.getsize(source_path)
-    
-    def iterfile():
-        with open(source_path, mode="rb") as f:
-            while chunk := f.read(1024 * 1024): # 1MB chunks
-                yield chunk
-
-    headers = {
-        'Accept-Ranges': 'bytes',
-        'Content-Length': str(file_size),
-        'Content-Type': 'audio/mpeg' if source_path.lower().endswith('.mp3') else 'audio/flac' if source_path.lower().endswith('.flac') else 'audio/wav'
-    }
-
-    return StreamingResponse(iterfile(), headers=headers)
-
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from typing import Optional
+
+# Monta a raiz de músicas para acesso direto (Streaming de Alta Performance)
+music_root = config.get_path('MUSIC_ROOT')
+if os.path.exists(music_root):
+    app.mount("/music_files", StaticFiles(directory=music_root), name="music")
 
 @app.get("/library")
 def get_library(
@@ -167,21 +147,28 @@ def get_library(
     # Registros da página
     offset = (page - 1) * limit
     rows = db.conn.execute(
-        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
+        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo, caminho_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
         params + [limit, offset]
     ).fetchall()
 
+    items = []
+    for r in rows:
+        # Gera o caminho relativo para o player estático
+        full_path = r[8]
+        rel_path = os.path.relpath(full_path, music_root).replace('\\', '/')
+        
+        items.append({
+            "id": r[0], "nome": r[1], "artista": r[2],
+            "categoria": r[3], "bpm": r[4], "peso": r[5],
+            "sub_categoria": r[6], "data_arquivo": r[7],
+            "url": f"/music_files/{rel_path}"
+        })
+
     return {
-        "items": [
-            {
-                "id": r[0], "nome": r[1], "artista": r[2],
-                "categoria": r[3], "bpm": r[4], "peso": r[5],
-                "sub_categoria": r[6], "data_arquivo": r[7]
-            } for r in rows
-        ],
+        "items": items,
         "total": total,
         "page": page,
-        "pages": max(1, -(-total // limit))  # ceil division
+        "pages": max(1, -(-total // limit))
     }
 
 @app.put("/library/{track_id}")
