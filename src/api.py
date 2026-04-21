@@ -118,27 +118,26 @@ def get_library():
 
 # --- Tasks de Segundo Plano ---
 
-async def run_generation_task(start_date_str: str, days: int):
+def run_generation_task(start_date_str: str, days: int):
     state.is_busy = True
     state.logs = []
-    add_log(f"🚀 Iniciando geração de {days} dia(s) a partir de {start_date_str}...")
+    add_log(f"Iniciando geracao de {days} dia(s) a partir de {start_date_str}...")
     try:
-        engine = PlaylistEngine()
-        engine.logger_callback = add_log
+        engine = PlaylistEngine(log_callback=add_log)
         start_date = datetime.datetime.strptime(start_date_str, '%Y%m%d').date()
         for i in range(days):
             current_date = start_date + datetime.timedelta(days=i)
             current_date_str = current_date.strftime('%Y%m%d')
             add_log(f"--- Processando Dia {i+1}/{days}: {current_date_str} ---")
             engine.generate_schedule(current_date_str)
-        add_log("✅ Geração concluída com sucesso!")
+        add_log("Geracao concluida com sucesso!")
     except Exception as e:
-        add_log(f"❌ Erro crítico na geração: {str(e)}")
-        logger.exception("Falha na geração")
+        add_log(f"Erro critico na geracao: {str(e)}")
+        logger.exception("Falha na geracao")
     finally:
         state.is_busy = False
 
-async def run_sync_task():
+def run_sync_task():
     state.is_busy = True
     state.logs = []
     add_log("Iniciando Sincronizacao Geral da Biblioteca...")
@@ -148,6 +147,7 @@ async def run_sync_task():
         if not os.path.exists(music_root):
             add_log(f"Erro: Raiz de musicas nao encontrada em {music_root}")
             return
+        
         categories = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d))]
         for cat in categories:
             folder_path = os.path.join(music_root, cat)
