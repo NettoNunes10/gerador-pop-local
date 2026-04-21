@@ -22,10 +22,16 @@ class DatabaseManager:
                 nome_musica TEXT,
                 artista TEXT,
                 pasta_categoria TEXT,
+                sub_categoria TEXT,
                 bpm REAL,
                 peso_especifico REAL DEFAULT 1.0
             )
         ''')
+        # Garantir coluna sub_categoria para bancos existentes
+        try:
+            cursor.execute("ALTER TABLE biblioteca ADD COLUMN sub_categoria TEXT")
+        except:
+            pass
 
         # Tabela artistas_favoritos
         cursor.execute('''
@@ -78,19 +84,28 @@ class DatabaseManager:
         ''', (filepath, now, now.weekday()))
         self.conn.commit()
 
-    def get_best_candidate(self, category_folder, current_hour, last_bpm=0, min_rest_hours=4):
+    def update_subcategory(self, track_id, subcat):
+        """Atualiza a subcategoria (tag) de uma música."""
+        self.conn.execute("UPDATE biblioteca SET sub_categoria = ? WHERE id = ?", (subcat, track_id))
+        self.conn.commit()
+
+    def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_bpm=0, min_rest_hours=4):
         cursor = self.conn.cursor()
         
-        # 1. Pegar todos os arquivos da biblioteca que pertencem a esta categoria
-        # e que existem fisicamente (pelo caminho)
-        cursor.execute('''
+        query = '''
             SELECT b.*, f.multiplicador,
                    (SELECT MAX(data_hora) FROM historico_execucao h WHERE h.caminho_arquivo = b.caminho_arquivo) as ultima_vez
             FROM biblioteca b
             LEFT JOIN artistas_favoritos f ON b.artista = f.nome_artista
             WHERE b.pasta_categoria = ?
-        ''', (category_folder,))
+        '''
+        params = [category_folder]
         
+        if subcategory:
+            query += " AND b.sub_categoria = ?"
+            params.append(subcategory)
+            
+        cursor.execute(query, params)
         candidates = cursor.fetchall()
         if not candidates:
             return None

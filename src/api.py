@@ -120,7 +120,7 @@ def stream_audio(track_id: int):
 
 @app.get("/library")
 def get_library():
-    cursor = db.conn.execute("SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico FROM biblioteca ORDER BY artista ASC")
+    cursor = db.conn.execute("SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria FROM biblioteca ORDER BY artista ASC")
     return [
         {
             "id": r[0], 
@@ -128,13 +128,17 @@ def get_library():
             "artista": r[2], 
             "categoria": r[3], 
             "bpm": r[4],
-            "peso": r[5]
+            "peso": r[5],
+            "sub_categoria": r[6]
         } for r in cursor.fetchall()
     ]
 
-@app.put("/library/{track_id}/weight")
-def update_track_weight(track_id: int, weight: float = Body(..., embed=True)):
-    db.update_weight(track_id, weight)
+@app.put("/library/{track_id}")
+def update_track_metadata(track_id: int, data: dict = Body(...)):
+    if "weight" in data:
+        db.update_weight(track_id, data["weight"])
+    if "sub_categoria" in data:
+        db.update_subcategory(track_id, data["sub_categoria"])
     return {"status": "updated"}
 
 

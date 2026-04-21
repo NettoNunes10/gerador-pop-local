@@ -115,22 +115,29 @@ class PlaylistEngine:
         except Exception as e:
             self.log(f"Erro ao sincronizar pasta {category}: {str(e)}")
 
-    def select_music(self, folder_path, category, current_hour):
-        # Lógica de Surpresa (Wildcard Idea 1)
-        original_category = category
-        for rule in config.surprise_rules:
-            if rule['target'] == category:
-                if random.random() < rule['chance']:
-                    self.log(f"🎲 SURPRESA: Trocando '{category}' por '{rule['surprise']}' ({int(rule['chance']*100)}% chance)")
-                    category = rule['surprise']
-                    folder_path = os.path.join(config.get_path('MUSIC_ROOT'), category)
-                    break
+    def select_music(self, folder_path, cat_string, current_hour):
+        # Lógica de decomposição: 'SERTANEJO TOP' -> category='SERTANEJO', sub='TOP'
+        parts = cat_string.split(' ', 1)
+        category = parts[0]
+        subcategory = parts[1] if len(parts) > 1 else None
 
-        # Sincronização rápida
+        # Re-ajusta folder_path baseado na categoria principal
+        music_root = config.get_path('MUSIC_ROOT')
+        folder_path = os.path.join(music_root, category)
+
+        # Lógica de Surpresa (Wildcard Idea 1) baseada na string completa
+        for rule in config.surprise_rules:
+            if rule['target'] == cat_string:
+                if random.random() < rule['chance']:
+                    self.log(f"🎲 SURPRESA: Trocando '{cat_string}' por '{rule['surprise']}'")
+                    # Recursivo com a nova string
+                    return self.select_music("", rule['surprise'], current_hour)
+
+        # Sincronização rápida (pela pasta principal)
         self.sync_folder_to_db(folder_path, category)
         
-        # Busca o melhor candidato no banco (Ranking de Score)
-        candidate = db.get_best_candidate(category, current_hour, last_bpm=self.last_bpm)
+        # Busca o melhor candidato no banco (Ranking de Score + Subcategoria)
+        candidate = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_bpm=self.last_bpm)
         
         if candidate:
             full_path = candidate['caminho_arquivo']

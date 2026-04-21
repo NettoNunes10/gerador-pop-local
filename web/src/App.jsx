@@ -189,15 +189,14 @@ function App() {
     }
   }
 
-  const handleUpdateWeight = async (trackId, newWeight) => {
+  const handleUpdateMetadata = async (trackId, field, value) => {
     try {
-      await fetch(`${API_URL}/library/${trackId}/weight`, {
+      await fetch(`${API_URL}/library/${trackId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weight: parseFloat(newWeight) })
+        body: JSON.stringify({ [field]: field === 'weight' ? parseFloat(value) : value })
       })
-      // Update local state to avoid refresh
-      setLibrary(library.map(t => t.id === trackId ? {...t, peso: parseFloat(newWeight)} : t))
+      setLibrary(library.map(t => t.id === trackId ? {...t, [field === 'weight' ? 'peso' : 'sub_categoria']: value} : t))
     } catch (e) { console.error(e) }
   }
 
@@ -407,9 +406,10 @@ function App() {
               <th style={{width: '60px', textAlign: 'left', padding: '1rem'}}>PLAY</th>
               <th style={{width: '180px', textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
               <th style={{textAlign: 'left', padding: '1rem'}}>MÚSICA</th>
-              <th style={{width: '120px', textAlign: 'left', padding: '1rem'}}>CATEGORIA</th>
+              <th style={{width: '120px', textAlign: 'left', padding: '1rem'}}>PASTA</th>
+              <th style={{width: '120px', textAlign: 'left', padding: '1rem'}}>SUB (TAG)</th>
               <th style={{width: '80px', textAlign: 'left', padding: '1rem'}}>BPM</th>
-              <th style={{width: '100px', textAlign: 'left', padding: '1rem'}}>PESO</th>
+              <th style={{width: '80px', textAlign: 'left', padding: '1rem'}}>PESO</th>
             </tr>
           </thead>
           <tbody>
@@ -422,7 +422,16 @@ function App() {
                 </td>
                 <td style={{fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={track.artista}>{track.artista}</td>
                 <td style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={track.nome}>{track.nome}</td>
-                <td><span className="badge" style={{background: 'rgba(255,255,255,0.05)'}}>{track.categoria}</span></td>
+                <td style={{fontSize: '0.75rem', opacity: 0.7}}>{track.categoria}</td>
+                <td>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: TOP"
+                    defaultValue={track.sub_categoria || ''} 
+                    onBlur={e => handleUpdateMetadata(track.id, 'sub_categoria', e.target.value.toUpperCase())}
+                    style={{padding: '0.3rem', width: '90px', fontSize: '0.75rem', textAlign: 'center', background: 'rgba(255,255,255,0.03)'}}
+                  />
+                </td>
                 <td style={{color: track.bpm > 120 ? 'var(--error)' : track.bpm < 80 ? 'var(--accent-color)' : 'var(--success)'}}>
                   {Math.round(track.bpm)}
                 </td>
@@ -431,8 +440,8 @@ function App() {
                     type="number" 
                     step="0.1" 
                     defaultValue={track.peso || 1.0} 
-                    onBlur={e => handleUpdateWeight(track.id, e.target.value)}
-                    style={{padding: '0.3rem', width: '60px', fontSize: '0.8rem', textAlign: 'center'}}
+                    onBlur={e => handleUpdateMetadata(track.id, 'weight', e.target.value)}
+                    style={{padding: '0.3rem', width: '50px', fontSize: '0.75rem', textAlign: 'center', background: 'rgba(255,255,255,0.03)'}}
                   />
                 </td>
               </tr>
@@ -483,8 +492,8 @@ function App() {
           <tbody>
             {surpriseRules.map((rule, i) => (
               <tr key={i}>
-                <td><input type="text" placeholder="Ex: SERTANEJO B" value={rule.target} onChange={e => updateSurpriseRule(i, 'target', e.target.value)} /></td>
-                <td><input type="text" placeholder="Ex: SERTANEJO C" value={rule.surprise} onChange={e => updateSurpriseRule(i, 'surprise', e.target.value)} /></td>
+                <td><input type="text" placeholder="Ex: SERTANEJO TOP" value={rule.target} onChange={e => updateSurpriseRule(i, 'target', e.target.value)} /></td>
+                <td><input type="text" placeholder="Ex: SERTANEJO OLD" value={rule.surprise} onChange={e => updateSurpriseRule(i, 'surprise', e.target.value)} /></td>
                 <td><input type="number" step="0.01" min="0" max="1" value={rule.chance} onChange={e => updateSurpriseRule(i, 'chance', e.target.value)} /></td>
                 <td><button className="remove-row-btn" onClick={() => removeSurpriseRule(i)}><X size={12}/></button></td>
               </tr>
@@ -552,17 +561,14 @@ function App() {
 
   const renderGuide = () => (
     <div className="guide-content glass card">
-      <h2 className="card-title"><BookOpen size={20}/> Manual Técnico v3.3</h2>
+      <h2 className="card-title"><BookOpen size={20}/> Manual Técnico v3.4</h2>
       <div style={{padding: '1rem'}}>
-        <h3>1. Lógica de Scoring</h3>
-        <p>O score prioriza músicas com maior tempo de descanso e artistas favoritos.</p>
-        <div className="code-block">Score = Descanso * Peso * Mult_Artista * Dayparting</div>
+        <h3>1. Subcategorias (Tags)</h3>
+        <p>Use para segmentar pastas grandes. Ex: pasta <strong>SERTANEJO</strong> com tag <strong>TOP</strong>.</p>
+        <p>No seu arquivo .blm, chame como: <code>SERTANEJO TOP.apm</code></p>
         
-        <h3 style={{marginTop: '2rem'}}>2. Wildcards (Surpresas)</h3>
-        <p>Permite que uma categoria substitua outra aleatoriamente (ex: B vira C).</p>
-        
-        <h3 style={{marginTop: '2rem'}}>3. BPM e Energia</h3>
-        <p>O motor evita a sucessão de músicas lentas (&lt; 80 BPM).</p>
+        <h3 style={{marginTop: '2rem'}}>2. Lógica de Scoring</h3>
+        <p>Score = Descanso * Peso * Mult_Artista * Dayparting</p>
       </div>
     </div>
   )
@@ -571,7 +577,7 @@ function App() {
     <div className="app-container">
       <header style={{textAlign: 'center', marginBottom: '2rem'}}>
         <h1>GERADOR POP FM</h1>
-        <p className="subtitle">OS_SYSTEM_AUTOMATION_v3.3.0</p>
+        <p className="subtitle">OS_SYSTEM_AUTOMATION_v3.4.0</p>
       </header>
 
       <nav className="nav-tabs">
