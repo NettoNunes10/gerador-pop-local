@@ -87,46 +87,79 @@ class PlaylistEngine:
         return reservations
 
     def sync_folder_to_db(self, folder_path, category):
-        try:
-            if not os.path.exists(folder_path): return
+        if not os.path.exists(folder_path): return
 
-            # 1. Limpeza: Remove do banco arquivos que não existem mais na pasta
+        # 1. Limpeza: Remove do banco arquivos que não existem mais na pasta
+        try:
             cursor = db.conn.cursor()
             cursor.execute("SELECT id, caminho_arquivo FROM biblioteca WHERE pasta_categoria = ?", (category,))
             db_files = cursor.fetchall()
-            for row in db_files:
-                if not os.path.exists(row[1]):
-                    db.conn.execute("DELETE FROM biblioteca WHERE id = ?", (row[0],))
-            db.conn.commit()
+            ids_to_delete = [row[0] for row in db_files if not os.path.exists(row[1])]
+            if ids_to_delete:
+                db.conn.executemany("DELETE FROM biblioteca WHERE id = ?", [(i,) for i in ids_to_delete])
+                db.conn.commit()
+                self.log(f"Pasta '{category}': {len(ids_to_delete)} arquivo(s) removido(s) do banco.")
+        except Exception as e:
+            self.log(f"Erro na limpeza de '{category}': {e}")
 
-            # 2. Sincronização: Adiciona novos arquivos
+        # 2. Sincronização: Analisa novos arquivos
+        try:
             files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.flac'))]
             total = len(files)
             if total > 0:
                 self.log(f"Pasta '{category}': {total} arquivos encontrados.")
-            
+
+            import datetime as dt
+            novos = []  # Coleta todos os novos para gravar em lote
+
             for index, f in enumerate(files):
                 full_path = os.path.join(folder_path, f).replace('/', '\\')
-                
-                cursor.execute("SELECT bpm, sub_categoria FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
-                row = cursor.fetchone()
-                
-                # Se não existe ou não tem BPM, analisa
-                if not row or row[0] == 0:
-                    self.log(f"[{index+1}/{total}] Analisando: {f}...")
-                    artists, title = self.parse_artist_title(f)
-                    bpm = analyzer.get_bpm(full_path)
-                    
-                    # Captura data de criação do arquivo no Windows (ctime)
-                    import datetime as dt
-                    ctime = os.path.getctime(full_path)
-                    data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
-                    
-                    # Se for novo (sem row), usa STD como padrão
-                    subcat = row[1] if row else 'STD'
-                    db.add_to_library(full_path, ", ".join(artists), title, category, bpm, subcat, data_arquivo)
+                try:
+                    cursor.execute("SELECT bpm, sub_categoria FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
+                    row = cursor.fetchone()
+
+                    # Só analisa se for novo ou sem BPM
+                    if not row or row[0] == 0:
+                        self.log(f"[{index+1}/{total}] Analisando: {f}...")
+                        artists, title = self.parse_artist_title(f)
+                        bpm = analyzer.get_bpm(full_path)
+                        ctime = os.path.getctime(full_path)
+                        data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
+                        subcat = row[1] if row else 'STD'
+                        novos.append((full_path, ", ".join(artists), title, category, bpm, subcat, data_arquivo))
+
+                        # Grava em lote a cada 20 arquivos para liberar o banco periodicamente
+                        if len(novos) >= 20:
+                            db.conn.executemany('''
+                                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(caminho_arquivo) DO UPDATE SET
+                                    artista=excluded.artista, nome_musica=excluded.nome_musica,
+                                    pasta_categoria=excluded.pasta_categoria, bpm=excluded.bpm,
+                                    sub_categoria=excluded.sub_categoria,
+                                    data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
+                            ''', novos)
+                            db.conn.commit()
+                            novos = []
+
+                except Exception as e:
+                    self.log(f"  [AVISO] Falha no arquivo '{f}': {e}")
+
+            # Grava o restante
+            if novos:
+                db.conn.executemany('''
+                    INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(caminho_arquivo) DO UPDATE SET
+                        artista=excluded.artista, nome_musica=excluded.nome_musica,
+                        pasta_categoria=excluded.pasta_categoria, bpm=excluded.bpm,
+                        sub_categoria=excluded.sub_categoria,
+                        data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
+                ''', novos)
+                db.conn.commit()
+
         except Exception as e:
-            self.log(f"Erro ao sincronizar pasta {category}: {str(e)}")
+            self.log(f"Erro ao sincronizar pasta '{category}': {e}")
 
     def select_music(self, folder_path, cat_string, current_hour):
         # Lógica de decomposição: 'SERTANEJO TOP' -> category='SERTANEJO', sub='TOP'
