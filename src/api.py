@@ -88,14 +88,22 @@ def get_stats():
 
 import shutil
 
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from typing import Optional
 
-# Monta a raiz de músicas para acesso direto (Streaming de Alta Performance)
-music_root = config.get_path('MUSIC_ROOT')
-if os.path.exists(music_root):
-    app.mount("/music_files", StaticFiles(directory=music_root), name="music")
+@app.get("/stream/{track_id}")
+def stream_audio(track_id: int):
+    cursor = db.conn.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (track_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Música não encontrada")
+    
+    source_path = row[0].replace('/', '\\')
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
+
+    # FileResponse é o padrão ouro: suporta Range, Streaming e é instantâneo
+    return FileResponse(source_path)
 
 @app.get("/library")
 def get_library(
@@ -147,33 +155,18 @@ def get_library(
     # Registros da página
     offset = (page - 1) * limit
     rows = db.conn.execute(
-        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo, caminho_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
+        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
         params + [limit, offset]
     ).fetchall()
 
-    import urllib.parse
-
-    items = []
-    for r in rows:
-        try:
-            full_path = r[8]
-            # Normaliza e gera caminho relativo
-            rel_path = os.path.relpath(full_path, music_root).replace('\\', '/')
-            
-            # Codifica espaços e acentos, mas MANTÉM as barras /
-            encoded_rel = urllib.parse.quote(rel_path, safe='/')
-            
-            items.append({
+    return {
+        "items": [
+            {
                 "id": r[0], "nome": r[1], "artista": r[2],
                 "categoria": r[3], "bpm": r[4], "peso": r[5],
-                "sub_categoria": r[6], "data_arquivo": r[7],
-                "url": f"/music_files/{encoded_rel}"
-            })
-        except Exception as e:
-            continue
-
-    return {
-        "items": items,
+                "sub_categoria": r[6], "data_arquivo": r[7]
+            } for r in rows
+        ],
         "total": total,
         "page": page,
         "pages": max(1, -(-total // limit))

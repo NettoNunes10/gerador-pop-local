@@ -254,13 +254,12 @@ function App() {
     setCurrentTrack(track)
     setIsPlayerLoading(true)
     
-    // Agora usamos a URL direta servida pelo StaticFiles
-    // Isso é instantâneo pois o navegador gerencia o streaming nativamente
-    const directUrl = `${API_URL}${track.url}`
+    // Voltamos para o endpoint seguro /stream/{id}
+    const directUrl = `${API_URL}/stream/${track.id}`
     
     if (audioRef.current) {
       audioRef.current.src = directUrl
-      audioRef.current.load() // Força o carregamento do novo source
+      audioRef.current.load()
       audioRef.current.play()
         .then(() => setIsPlayerLoading(false))
         .catch(e => {
