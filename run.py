@@ -20,13 +20,9 @@ def run_app():
 
     # 1. Iniciar o Backend (FastAPI) em um processo separado
     print("  [1/2] Iniciando backend na porta 8000...")
-    # Capturamos stdout/stderr para diagnóstico em caso de erro
     backend_proc = subprocess.Popen(
         [sys.executable, "-m", "src.api"],
-        cwd=os.getcwd(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True
+        cwd=os.getcwd()
     )
 
     # 2. Iniciar o Frontend (Vite)
