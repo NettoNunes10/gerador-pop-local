@@ -26,6 +26,7 @@ function App() {
   const [stats, setStats] = useState({ categories: [], top_artists: [] })
   const [logs, setLogs] = useState([])
   const [isBusy, setIsBusy] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
   const [rotationGroups, setRotationGroups] = useState([
     { name: 'TOP', min_weight: 3.0, base_weight: 3.0 },
     { name: 'HIT', min_weight: 2.0, base_weight: 2.0 },
@@ -80,22 +81,28 @@ function App() {
 
     // Polling inteligente: só agenda novo poll APÓS o anterior terminar
     let cancelled = false
+    let failureCount = 0
     const poll = async () => {
       if (cancelled) return
       try {
         const res = await safeFetch(`${API_URL}/logs`)
         const data = await res.json()
         setLogs(data.logs)
-      } catch (e) { }
-      try {
-        const res = await safeFetch(`${API_URL}/status`)
-        const data = await res.json()
-        setSystemStatus(data)
-        setIsBusy(data.is_busy)
-      } catch (e) { }
-      if (!cancelled) setTimeout(poll, 2000)
+        
+        const res2 = await safeFetch(`${API_URL}/status`)
+        const data2 = await res2.json()
+        setSystemStatus(data2)
+        setIsBusy(data2.is_busy)
+        
+        setIsOffline(false)
+        failureCount = 0
+      } catch (e) { 
+        failureCount++
+        if (failureCount >= 2) setIsOffline(true)
+      }
+      if (!cancelled) setTimeout(poll, 4000) // Aumentado para 4s
     }
-    setTimeout(poll, 2000)
+    setTimeout(poll, 4000)
     return () => { cancelled = true }
   }, [])
 
@@ -385,10 +392,10 @@ function App() {
 
         <section className="card glass">
           <h2 className="card-title"><Database size={20}/> Motor v3.0</h2>
-          <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem'}}>
-            <span style={{fontSize: '0.8rem', opacity: 0.7}}>SERVIDOR</span>
-            <span className={`badge ${systemStatus?.status === 'online' ? 'badge-online' : 'badge-error'}`}>
-              {systemStatus?.status || 'OFFLINE'}
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+            <span style={{fontSize: '0.8rem', opacity: 0.6}}>SERVIDOR</span>
+            <span style={{color: isOffline ? '#ff4444' : '#00f2ff', fontWeight: 800, fontSize: '0.75rem'}}>
+              {isOffline ? 'OFFLINE' : 'ONLINE'}
             </span>
           </div>
           <div style={{display: 'flex', justifyContent: 'space-between'}}>

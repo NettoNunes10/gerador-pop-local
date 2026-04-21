@@ -16,16 +16,24 @@ class DatabaseManager:
     def _get_conn(self):
         """Retorna a conexão SQLite da thread atual (cria se não existir)."""
         if not hasattr(self._local, 'conn') or self._local.conn is None:
-            conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")   # Permite leituras simultâneas
-            conn.execute("PRAGMA busy_timeout=5000")  # Espera até 5s antes de dar erro
-            self._local.conn = conn
+            try:
+                conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30) # Aumentado timeout
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")   
+                conn.execute("PRAGMA synchronous=OFF")    # Mais performance, menos bloqueio
+                conn.execute("PRAGMA busy_timeout=10000") # 10 segundos
+                conn.execute("PRAGMA journal_size_limit=10000000") # Limita arquivo WAL a 10MB
+                self._local.conn = conn
+            except Exception as e:
+                print(f"CRITICAL DB ERROR: {e}")
+                return None
         return self._local.conn
 
     @property
     def conn(self):
-        return self._get_conn()
+        c = self._get_conn()
+        if c is None: raise Exception("Banco de dados inacessível")
+        return c
 
     def _create_tables(self, conn):
         cursor = conn.cursor()
@@ -79,6 +87,12 @@ class DatabaseManager:
                 cursor.execute("INSERT OR IGNORE INTO artistas_favoritos (nome_artista, multiplicador) VALUES (?, ?)", (artist, 1.5))
         
         conn.commit()
+        
+        # Otimização: Limpa logs e reconstrói banco (previne travamento por arquivo WAL gigante)
+        try:
+            conn.execute("PRAGMA optimize")
+            conn.execute("VACUUM")
+        except: pass
 
     def add_to_library(self, filepath, artists, title, category, bpm, subcat='STD', data_arquivo=None):
         """Adiciona ou atualiza uma música na biblioteca."""

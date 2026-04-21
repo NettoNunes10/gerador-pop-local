@@ -290,6 +290,24 @@ async def start_sync():
     t.start()
     return {"status": "started"}
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    # Print no terminal para cada request (ajuda a saber se o backend travou)
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {request.method} {request.url.path}")
+    return await call_next(request)
+
+# --- Watchdog (Printa status no terminal a cada 30s) ---
+def watchdog():
+    import time
+    while True:
+        try:
+            print(f"--- HEARTBEAT: Servidor Ativo | Busy: {state.is_busy} | Logs: {len(state.logs)} ---")
+        except: pass
+        time.sleep(30)
+
+threading.Thread(target=watchdog, daemon=True).start()
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.api:app", host="0.0.0.0", port=8000, reload=False)
+    # Rodando com workers=1 mas loop asyncio otimizado
+    uvicorn.run("src.api:app", host="0.0.0.0", port=8000, reload=False, workers=1, timeout_keep_alive=30)
