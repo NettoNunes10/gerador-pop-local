@@ -106,6 +106,18 @@ function App() {
     } catch (e) { }
   }
 
+  const handleSync = async () => {
+    setIsBusy(true)
+    try {
+      const res = await fetch(`${API_URL}/sync`, { method: 'POST' })
+      if (!res.ok) throw new Error("Sistema já está processando.")
+      alert("Sincronização iniciada! Acompanhe o progresso no Painel (Console).")
+    } catch (e) {
+      alert(e.message)
+      setIsBusy(false)
+    }
+  }
+
   const handleGenerate = async () => {
     setIsBusy(true)
     const backendDate = selectedDate.replace(/-/g, '')
@@ -290,7 +302,17 @@ function App() {
     <div className="glass card">
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
         <h2 className="card-title" style={{margin: 0}}><Database size={20}/> Biblioteca Musical ({library.length} faixas)</h2>
-        <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.5rem 1rem'}}><RefreshCw size={16}/></button>
+        <div style={{display: 'flex', gap: '1rem'}}>
+          <button 
+            onClick={handleSync} 
+            className={`primary ${isBusy ? 'pulse' : ''}`} 
+            style={{padding: '0.5rem 1rem', fontSize: '0.8rem'}}
+            disabled={isBusy}
+          >
+            {isBusy ? 'SINCRONIZANDO...' : 'SINCRONIZAR ARQUIVOS'}
+          </button>
+          <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.5rem 1rem'}}><RefreshCw size={16}/></button>
+        </div>
       </div>
       <div style={{overflowY: 'auto', maxHeight: '600px'}}>
         <table className="lib-table">
