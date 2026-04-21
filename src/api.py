@@ -101,23 +101,20 @@ def stream_audio(track_id: int):
         add_log(f"⚠️ Arquivo inacessível: {source_path}")
         raise HTTPException(status_code=404, detail="Arquivo físico inacessível")
 
-    # Estratégia de Fuga de Rede: Copia para local antes de tocar
-    temp_dir = "web/public/temp_stream"
-    os.makedirs(temp_dir, exist_ok=True)
-    
-    ext = os.path.splitext(source_path)[1]
-    temp_filename = f"track_{track_id}{ext}"
-    local_path = os.path.join(temp_dir, temp_filename)
-    
+    if not os.path.exists(source_path):
+        add_log(f"⚠️ Arquivo inacessível: {source_path}")
+        raise HTTPException(status_code=404, detail="Arquivo físico inacessível")
+
+    # Streaming Direto (Instantâneo): Como a rede está mapeada, servimos o arquivo original.
+    # O FileResponse do FastAPI cuida de transmitir os pedaços conforme o player solicita.
     try:
-        if not os.path.exists(local_path):
-            shutil.copy2(source_path, local_path)
-        
-        # Retorna o arquivo local que o navegador consegue ler sem problemas de rede
-        return FileResponse(local_path)
+        return FileResponse(
+            source_path, 
+            media_type="audio/mpeg" if source_path.lower().endswith(".mp3") else "application/octet-stream"
+        )
     except Exception as e:
-        add_log(f"❌ Falha ao copiar para streaming local: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao preparar áudio")
+        add_log(f"❌ Erro no streaming de áudio: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao transmitir áudio")
 
 from typing import Optional
 
