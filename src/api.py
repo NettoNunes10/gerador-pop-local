@@ -104,7 +104,8 @@ def stream_audio(track_id: int):
     def iterfile():
         try:
             with open(path, mode="rb") as file_like:
-                yield from file_like
+                while chunk := file_like.read(1024 * 1024):
+                    yield chunk
         except Exception as e:
             add_log(f"❌ Falha ao ler arquivo de rede: {e}")
 

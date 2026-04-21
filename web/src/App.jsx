@@ -21,6 +21,8 @@ function App() {
   const [stats, setStats] = useState({ categories: [], top_artists: [] })
   const [logs, setLogs] = useState([])
   const [isBusy, setIsBusy] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
   
   // Player State
   const [currentTrack, setCurrentTrack] = useState(null)
@@ -308,7 +310,26 @@ function App() {
   const renderLibrary = () => (
     <div className="glass card">
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
-        <h2 className="card-title" style={{margin: 0}}><Database size={20}/> Biblioteca Musical ({library.length} faixas)</h2>
+        <h2 className="card-title" style={{margin: 0}}><Database size={20}/> Biblioteca ({filteredLibrary.length})</h2>
+        <div style={{display: 'flex', gap: '1rem', flex: 1, margin: '0 2rem'}}>
+          <input 
+            type="text" 
+            placeholder="Buscar artista ou música..." 
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            style={{padding: '0.5rem', fontSize: '0.8rem'}}
+          />
+          <select 
+            value={filterCategory} 
+            onChange={e => setFilterCategory(e.target.value)}
+            style={{padding: '0.5rem', width: '200px', fontSize: '0.8rem'}}
+          >
+            <option value="">Todas Categorias</option>
+            {[...new Set(library.map(t => t.categoria))].map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+        </div>
         <div style={{display: 'flex', gap: '1rem'}}>
           <button 
             onClick={handleSync} 
@@ -316,7 +337,7 @@ function App() {
             style={{padding: '0.5rem 1rem', fontSize: '0.8rem', width: 'auto'}}
             disabled={isBusy}
           >
-            {isBusy ? 'PROCESSANDO...' : 'SINCRONIZAR ARQUIVOS'}
+            {isBusy ? 'PROCESSANDO...' : 'SINCRONIZAR'}
           </button>
           <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.5rem 1rem'}}><RefreshCw size={16}/></button>
         </div>
@@ -333,7 +354,7 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {library.map((track) => (
+            {filteredLibrary.map((track) => (
               <tr key={track.id}>
                 <td>
                   <button className="play-btn" onClick={() => playTrack(track)}>

@@ -20,11 +20,14 @@ class PlaylistEngine:
             except:
                 pass
         
-        # Garante que o print no console não trave por causa de acentos
+        # Tenta imprimir normal, se falhar (por causa de acentos), limpa a string
         try:
             print(f"[ENGINE] {message}")
         except UnicodeEncodeError:
-            print(f"[ENGINE] (Omitindo nome devido a erro de acento no terminal)")
+            # Sanitização simples para o console do Windows
+            import unicodedata
+            msg_clean = unicodedata.normalize('NFKD', message).encode('ascii', 'ignore').decode('ascii')
+            print(f"[ENGINE] {msg_clean} (Nome sanitizado para exibição)")
 
     def get_audio_duration(self, filepath):
         try:
