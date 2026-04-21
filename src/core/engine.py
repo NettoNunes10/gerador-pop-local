@@ -8,16 +8,15 @@ from .database import db
 from .analyzer import analyzer
 
 class PlaylistEngine:
-    def __init__(self):
+    def __init__(self, log_callback=None):
         self.last_sweeper = ""
         self.last_bpm = 0
-        self.logger_callback = None
+        self.log_callback = log_callback
 
     def log(self, message):
-        if self.logger_callback:
-            self.logger_callback(message)
-        else:
-            print(message)
+        if self.log_callback:
+            self.log_callback(message)
+        print(f"[ENGINE] {message}")
 
     def get_audio_duration(self, filepath):
         try:
