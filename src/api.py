@@ -63,7 +63,8 @@ def get_config():
         "favorite_artists": list(config.favorite_artists),
         "paid_rules": config.paid_rules,
         "surprise_rules": config.surprise_rules,
-        "day_templates": config.day_templates
+        "day_templates": config.day_templates,
+        "rotation_groups": config.rotation_groups
     }
 
 @app.post("/config")
@@ -135,11 +136,41 @@ def get_library():
 
 @app.put("/library/{track_id}")
 def update_track_metadata(track_id: int, data: dict = Body(...)):
+    """Atualiza metadados de uma faixa com lógica bidirecional peso<->grupo."""
     if "weight" in data:
-        db.update_weight(track_id, data["weight"])
+        new_weight = float(data["weight"])
+        # Peso muda → recalcula o grupo automaticamente
+        new_group = config.get_group_for_weight(new_weight)
+        db.update_weight(track_id, new_weight)
+        db.update_subcategory(track_id, new_group)
+        return {"status": "updated", "new_weight": new_weight, "new_group": new_group}
+    
     if "sub_categoria" in data:
-        db.update_subcategory(track_id, data["sub_categoria"])
-    return {"status": "updated"}
+        new_group = data["sub_categoria"]
+        # Grupo muda → seta o peso base do grupo
+        new_weight = config.get_base_weight_for_group(new_group)
+        db.update_subcategory(track_id, new_group)
+        db.update_weight(track_id, new_weight)
+        return {"status": "updated", "new_group": new_group, "new_weight": new_weight}
+    
+    return {"status": "no_change"}
+
+@app.post("/library/batch")
+def batch_update_library(data: dict = Body(...)):
+    """Atualiza peso/grupo em lote para uma lista de track_ids."""
+    track_ids = data.get("track_ids", [])
+    if not track_ids:
+        raise HTTPException(status_code=400, detail="Nenhum track selecionado")
+    
+    if "sub_categoria" in data:
+        new_group = data["sub_categoria"]
+        new_weight = config.get_base_weight_for_group(new_group)
+        for tid in track_ids:
+            db.update_subcategory(tid, new_group)
+            db.update_weight(tid, new_weight)
+        return {"status": "updated", "count": len(track_ids), "new_group": new_group, "new_weight": new_weight}
+    
+    return {"status": "no_change"}
 
 
 # --- Tasks de Segundo Plano ---

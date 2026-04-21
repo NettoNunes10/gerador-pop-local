@@ -21,6 +21,14 @@ function App() {
   const [stats, setStats] = useState({ categories: [], top_artists: [] })
   const [logs, setLogs] = useState([])
   const [isBusy, setIsBusy] = useState(false)
+  const [rotationGroups, setRotationGroups] = useState([
+    { name: 'TOP', min_weight: 3.0, base_weight: 3.0 },
+    { name: 'HIT', min_weight: 2.0, base_weight: 2.0 },
+    { name: 'STD', min_weight: 1.0, base_weight: 1.0 },
+    { name: 'OLD', min_weight: 0.0, base_weight: 0.5 },
+  ])
+  const [selectedTracks, setSelectedTracks] = useState(new Set())
+  const [filterGroup, setFilterGroup] = useState('')
   
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('')
@@ -86,6 +94,7 @@ function App() {
       setPaidRules(data.paid_rules || [])
       setDayTemplates(data.day_templates || {})
       setSurpriseRules(data.surprise_rules || [])
+      if (data.rotation_groups) setRotationGroups(data.rotation_groups)
     } catch (e) { }
   }
 
@@ -152,7 +161,8 @@ function App() {
           favorite_artists: favoriteArtists,
           paid_rules: paidRules,
           day_templates: dayTemplates,
-          surprise_rules: surpriseRules
+          surprise_rules: surpriseRules,
+          rotation_groups: rotationGroups
         })
       })
       if (res.ok) {
@@ -165,6 +175,19 @@ function App() {
       setIsBusy(false)
     }
   }
+
+  // Lógica auxiliar de grupo baseada nos thresholds locais
+  const getGroupForWeight = (weight) => {
+    const sorted = [...rotationGroups].sort((a, b) => b.min_weight - a.min_weight)
+    for (const g of sorted) { if (weight >= g.min_weight) return g.name }
+    return rotationGroups[rotationGroups.length - 1]?.name || 'STD'
+  }
+
+  const getBaseWeightForGroup = (groupName) => {
+    return rotationGroups.find(g => g.name === groupName)?.base_weight || 1.0
+  }
+
+  const GROUP_COLORS = { TOP: '#bc13fe', HIT: '#ffaa00', STD: '#00f2ff', OLD: '#666' }
 
   const playTrack = async (track) => {
     setCurrentTrack(track)
@@ -191,13 +214,51 @@ function App() {
 
   const handleUpdateMetadata = async (trackId, field, value) => {
     try {
-      await fetch(`${API_URL}/library/${trackId}`, {
+      const body = { [field]: field === 'weight' ? parseFloat(value) : value }
+      const res = await fetch(`${API_URL}/library/${trackId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: field === 'weight' ? parseFloat(value) : value })
+        body: JSON.stringify(body)
       })
-      setLibrary(library.map(t => t.id === trackId ? {...t, [field === 'weight' ? 'peso' : 'sub_categoria']: value} : t))
+      const result = await res.json()
+      // Atualiza estado local com ambos peso e grupo (resposta bidirecional)
+      setLibrary(library.map(t => t.id === trackId 
+        ? { ...t, peso: result.new_weight ?? t.peso, sub_categoria: result.new_group ?? t.sub_categoria } 
+        : t
+      ))
     } catch (e) { console.error(e) }
+  }
+
+  const handleBatchUpdate = async (newGroup) => {
+    if (selectedTracks.size === 0) return
+    const track_ids = [...selectedTracks]
+    const res = await fetch(`${API_URL}/library/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track_ids, sub_categoria: newGroup })
+    })
+    const result = await res.json()
+    setLibrary(library.map(t => track_ids.includes(t.id)
+      ? { ...t, sub_categoria: result.new_group, peso: result.new_weight }
+      : t
+    ))
+    setSelectedTracks(new Set())
+  }
+
+  const toggleTrackSelection = (id) => {
+    setSelectedTracks(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedTracks.size === filteredLibrary.length) {
+      setSelectedTracks(new Set())
+    } else {
+      setSelectedTracks(new Set(filteredLibrary.map(t => t.id)))
+    }
   }
 
   // Filter Logic
@@ -205,13 +266,14 @@ function App() {
     const matchesSearch = (track.artista || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
                           (track.nome || "").toLowerCase().includes(searchTerm.toLowerCase())
     const matchesCategory = filterCategory === '' || track.categoria === filterCategory
+    const matchesGroup = filterGroup === '' || track.sub_categoria === filterGroup
     
     let matchesBpm = true
     if (bpmEnergy === 'L') matchesBpm = track.bpm < 80
     if (bpmEnergy === 'M') matchesBpm = track.bpm >= 80 && track.bpm <= 120
     if (bpmEnergy === 'H') matchesBpm = track.bpm > 120
     
-    return matchesSearch && matchesCategory && matchesBpm
+    return matchesSearch && matchesCategory && matchesBpm && matchesGroup
   })
 
   const addArtist = () => {
@@ -384,6 +446,14 @@ function App() {
             <option value="M">Média (M)</option>
             <option value="H">Alta (H)</option>
           </select>
+          <select 
+            value={filterGroup} 
+            onChange={e => setFilterGroup(e.target.value)}
+            style={{padding: '0.6rem', width: '110px', fontSize: '0.85rem'}}
+          >
+            <option value="">Grupo</option>
+            {rotationGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+          </select>
         </div>
 
         <div style={{display: 'flex', gap: '1rem'}}>
@@ -399,22 +469,39 @@ function App() {
         </div>
       </div>
 
+      {/* Barra de Ações em Lote */}
+      {selectedTracks.size > 0 && (
+        <div style={{display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.8rem 1.2rem', marginBottom: '1rem', background: 'rgba(188,19,254,0.15)', borderRadius: '10px', border: '1px solid rgba(188,19,254,0.4)'}}>
+          <span style={{fontSize: '0.85rem', fontWeight: 700, color: '#bc13fe'}}>{selectedTracks.size} selecionadas</span>
+          <span style={{opacity: 0.5, fontSize: '0.8rem'}}>Mover para:</span>
+          {rotationGroups.map(g => (
+            <button key={g.name} onClick={() => handleBatchUpdate(g.name)}
+              style={{padding: '0.3rem 0.8rem', fontSize: '0.78rem', fontWeight: 700, borderRadius: '6px', border: `1px solid ${GROUP_COLORS[g.name] || '#666'}`, background: 'transparent', color: GROUP_COLORS[g.name] || '#666', cursor: 'pointer'}}>
+              {g.name}
+            </button>
+          ))}
+          <button onClick={() => setSelectedTracks(new Set())} style={{marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6}}><X size={16}/></button>
+        </div>
+      )}
+
       <div style={{overflowY: 'auto', overflowX: 'hidden', maxHeight: '600px'}}>
         <table className="lib-table" style={{tableLayout: 'fixed'}}>
           <thead>
             <tr style={{background: 'none'}}>
-              <th style={{width: '60px', textAlign: 'left', padding: '1rem'}}>PLAY</th>
-              <th style={{width: '180px', textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
+              <th style={{width: '40px', padding: '1rem'}}><input type="checkbox" onChange={toggleSelectAll} checked={selectedTracks.size === filteredLibrary.length && filteredLibrary.length > 0}/></th>
+              <th style={{width: '55px', textAlign: 'left', padding: '1rem'}}>PLAY</th>
+              <th style={{width: '170px', textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
               <th style={{textAlign: 'left', padding: '1rem'}}>MÚSICA</th>
-              <th style={{width: '120px', textAlign: 'left', padding: '1rem'}}>PASTA</th>
-              <th style={{width: '120px', textAlign: 'left', padding: '1rem'}}>SUB (TAG)</th>
-              <th style={{width: '80px', textAlign: 'left', padding: '1rem'}}>BPM</th>
-              <th style={{width: '80px', textAlign: 'left', padding: '1rem'}}>PESO</th>
+              <th style={{width: '110px', textAlign: 'left', padding: '1rem'}}>PASTA</th>
+              <th style={{width: '105px', textAlign: 'left', padding: '1rem'}}>GRUPO</th>
+              <th style={{width: '70px', textAlign: 'left', padding: '1rem'}}>BPM</th>
+              <th style={{width: '75px', textAlign: 'left', padding: '1rem'}}>PESO</th>
             </tr>
           </thead>
           <tbody>
             {filteredLibrary.map((track) => (
-              <tr key={track.id}>
+              <tr key={track.id} style={{background: selectedTracks.has(track.id) ? 'rgba(188,19,254,0.08)' : undefined}}>
+                <td><input type="checkbox" checked={selectedTracks.has(track.id)} onChange={() => toggleTrackSelection(track.id)}/></td>
                 <td>
                   <button className="play-btn" onClick={() => playTrack(track)} disabled={isPlayerLoading}>
                     {isPlayerLoading && currentTrack?.id === track.id ? <RefreshCw size={14} className="pulse"/> : <Play size={14} fill="currentColor"/>}
@@ -424,13 +511,13 @@ function App() {
                 <td style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={track.nome}>{track.nome}</td>
                 <td style={{fontSize: '0.75rem', opacity: 0.7}}>{track.categoria}</td>
                 <td>
-                  <input 
-                    type="text" 
-                    placeholder="Ex: TOP"
-                    defaultValue={track.sub_categoria || ''} 
-                    onBlur={e => handleUpdateMetadata(track.id, 'sub_categoria', e.target.value.toUpperCase())}
-                    style={{padding: '0.3rem', width: '90px', fontSize: '0.75rem', textAlign: 'center', background: 'rgba(255,255,255,0.03)'}}
-                  />
+                  <select
+                    value={track.sub_categoria || 'STD'}
+                    onChange={e => handleUpdateMetadata(track.id, 'sub_categoria', e.target.value)}
+                    style={{padding: '0.3rem', width: '90px', fontSize: '0.75rem', textAlign: 'center', background: 'rgba(0,0,0,0.3)', color: GROUP_COLORS[track.sub_categoria] || '#fff', fontWeight: 700, border: `1px solid ${GROUP_COLORS[track.sub_categoria] || '#444'}`, borderRadius: '6px'}}
+                  >
+                    {rotationGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+                  </select>
                 </td>
                 <td style={{color: track.bpm > 120 ? 'var(--error)' : track.bpm < 80 ? 'var(--accent-color)' : 'var(--success)'}}>
                   {Math.round(track.bpm)}
@@ -438,10 +525,11 @@ function App() {
                 <td>
                   <input 
                     type="number" 
-                    step="0.1" 
-                    defaultValue={track.peso || 1.0} 
+                    step="0.1"
+                    key={`${track.id}-${track.peso}`}
+                    defaultValue={Number(track.peso || 1.0).toFixed(1)} 
                     onBlur={e => handleUpdateMetadata(track.id, 'weight', e.target.value)}
-                    style={{padding: '0.3rem', width: '50px', fontSize: '0.75rem', textAlign: 'center', background: 'rgba(255,255,255,0.03)'}}
+                    style={{padding: '0.3rem', width: '55px', fontSize: '0.75rem', textAlign: 'center', background: 'rgba(255,255,255,0.03)'}}
                   />
                 </td>
               </tr>
@@ -460,6 +548,23 @@ function App() {
   const renderSettings = () => (
     <div className="config-section glass card">
       <h2 className="card-title"><Settings size={20}/> Configurações Avançadas</h2>
+
+      <section style={{marginBottom: '3rem'}}>
+        <h3>🎚️ Grupos de Rotação</h3>
+        <p style={{opacity: 0.6, fontSize: '0.85rem', marginBottom: '1rem'}}>Define os thresholds de peso de cada grupo. Novos arquivos entram como STD.</p>
+        <table className="config-table">
+          <thead><tr><th>Grupo</th><th>Peso Mínimo (para entrar)</th><th>Peso Base (ao mudar pro grupo)</th></tr></thead>
+          <tbody>
+            {rotationGroups.map((g, i) => (
+              <tr key={i}>
+                <td><span style={{fontWeight: 800, color: GROUP_COLORS[g.name] || '#fff'}}>{g.name}</span></td>
+                <td><input type="number" step="0.1" value={g.min_weight} onChange={e => { const next = [...rotationGroups]; next[i] = {...g, min_weight: parseFloat(e.target.value)}; setRotationGroups(next) }}/></td>
+                <td><input type="number" step="0.1" value={g.base_weight} onChange={e => { const next = [...rotationGroups]; next[i] = {...g, base_weight: parseFloat(e.target.value)}; setRotationGroups(next) }}/></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
       
       <section style={{marginBottom: '3rem'}}>
         <h3>📅 Modelos por Dia da Semana (.blm)</h3>

@@ -87,31 +87,39 @@ class PlaylistEngine:
         return reservations
 
     def sync_folder_to_db(self, folder_path, category):
-        """Verifica arquivos novos na pasta e adiciona ao banco com BPM."""
-        if category.startswith('$') or 'RECYCLE.BIN' in category:
-            return
-            
-        valid_exts = ('.mp3', '.flac', '.wav')
         try:
-            files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
+            if not os.path.exists(folder_path): return
+
+            # 1. Limpeza: Remove do banco arquivos que não existem mais na pasta
+            cursor = db.conn.cursor()
+            cursor.execute("SELECT id, caminho_arquivo FROM biblioteca WHERE pasta_categoria = ?", (category,))
+            db_files = cursor.fetchall()
+            for row in db_files:
+                if not os.path.exists(row[1]):
+                    db.conn.execute("DELETE FROM biblioteca WHERE id = ?", (row[0],))
+            db.conn.commit()
+
+            # 2. Sincronização: Adiciona novos arquivos
+            files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.flac'))]
             total = len(files)
-            if total == 0: return
-            
-            self.log(f"Pasta '{category}': {total} arquivos encontrados.")
+            if total > 0:
+                self.log(f"Pasta '{category}': {total} arquivos encontrados.")
             
             for index, f in enumerate(files):
                 full_path = os.path.join(folder_path, f).replace('/', '\\')
                 
-                # Verifica se já está no banco com BPM
-                cursor = db.conn.cursor()
-                cursor.execute("SELECT bpm FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
+                cursor.execute("SELECT bpm, sub_categoria FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
                 row = cursor.fetchone()
                 
+                # Se não existe ou não tem BPM, analisa
                 if not row or row[0] == 0:
                     self.log(f"[{index+1}/{total}] Analisando: {f}...")
                     artists, title = self.parse_artist_title(f)
                     bpm = analyzer.get_bpm(full_path)
-                    db.add_to_library(full_path, ", ".join(artists), title, category, bpm)
+                    
+                    # Se for novo (não tem row), usa 'MED' como padrão
+                    subcat = row[1] if row else 'MED'
+                    db.add_to_library(full_path, ", ".join(artists), title, category, bpm, subcat)
         except Exception as e:
             self.log(f"Erro ao sincronizar pasta {category}: {str(e)}")
 

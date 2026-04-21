@@ -59,18 +59,19 @@ class DatabaseManager:
         
         self.conn.commit()
 
-    def add_to_library(self, file_path, artist, title, category, bpm=0.0):
+    def add_to_library(self, filepath, artists, title, category, bpm, subcat='MED'):
+        """Adiciona ou atualiza uma música na biblioteca."""
         try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                INSERT INTO biblioteca (caminho_arquivo, nome_musica, artista, pasta_categoria, bpm)
-                VALUES (?, ?, ?, ?, ?)
+            self.conn.execute('''
+                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(caminho_arquivo) DO UPDATE SET
-                    nome_musica=excluded.nome_musica,
                     artista=excluded.artista,
+                    nome_musica=excluded.nome_musica,
                     pasta_categoria=excluded.pasta_categoria,
-                    bpm=CASE WHEN excluded.bpm > 0 THEN excluded.bpm ELSE bpm END
-            ''', (file_path, title, artist, category, bpm))
+                    bpm=excluded.bpm,
+                    sub_categoria=excluded.sub_categoria
+            ''', (filepath, artists, title, category, bpm, subcat))
             self.conn.commit()
         except Exception as e:
             print(f"Erro ao adicionar à biblioteca: {e}")
