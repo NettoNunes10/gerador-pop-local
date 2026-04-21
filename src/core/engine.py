@@ -15,8 +15,16 @@ class PlaylistEngine:
 
     def log(self, message):
         if self.log_callback:
-            self.log_callback(message)
-        print(f"[ENGINE] {message}")
+            try:
+                self.log_callback(message)
+            except:
+                pass
+        
+        # Garante que o print no console não trave por causa de acentos
+        try:
+            print(f"[ENGINE] {message}")
+        except UnicodeEncodeError:
+            print(f"[ENGINE] (Omitindo nome devido a erro de acento no terminal)")
 
     def get_audio_duration(self, filepath):
         try:
