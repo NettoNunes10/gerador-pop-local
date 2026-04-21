@@ -22,7 +22,7 @@ def run_app():
     print("  [1/2] Iniciando backend na porta 8000...")
     # Capturamos stdout/stderr para diagnóstico em caso de erro
     backend_proc = subprocess.Popen(
-        [sys.executable, "src/api.py"],
+        [sys.executable, "-m", "src.api"],
         cwd=os.getcwd(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
