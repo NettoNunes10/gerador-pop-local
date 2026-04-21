@@ -41,4 +41,4 @@ git pull origin main
 ```
 
 ---
-*Desenvolvido por Antigravity AI para beAudio Systems.*
+*Desenvolvido por Elite System.*
