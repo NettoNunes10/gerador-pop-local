@@ -22,7 +22,7 @@ def run_app():
     print("  [1/2] Iniciando backend na porta 8000...")
     # Capturamos stdout/stderr para diagnóstico em caso de erro
     backend_proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"],
+        [sys.executable, "src/api.py"],
         cwd=os.getcwd(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -40,11 +40,11 @@ def run_app():
     )
 
     print("\n✅ Ambiente pronto!")
-    print("🔗 Backend: http://localhost:8000")
-    print("🔗 Interface: http://localhost:5173")
+    print("🔗 Backend: http://127.0.0.1:8000")
+    print("🔗 Interface: http://127.0.0.1:5173")
     
     time.sleep(3)
-    webbrowser.open("http://localhost:5173")
+    webbrowser.open("http://127.0.0.1:5173")
 
     try:
         while True:

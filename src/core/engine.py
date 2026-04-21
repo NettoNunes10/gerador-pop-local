@@ -144,6 +144,10 @@ class PlaylistEngine:
 
                 except Exception as e:
                     self.log(f"  [AVISO] Falha no arquivo '{f}': {e}")
+                
+                # LIBERA O GIL: Pausa curta para deixar o servidor responder à web
+                import time
+                time.sleep(0.1)
 
             # Grava o restante
             if novos:
