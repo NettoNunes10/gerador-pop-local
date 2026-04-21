@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Node / React
+node_modules/
+dist/
+build/
+.eslintcache
+
+# Apps / DB (Opcional: Geralmente não enviamos a base de dados local)
+base_dados_radio.db
+settings.json
+log_geracao.txt
+
+# OS
+.DS_Store
+Thumbs.db
