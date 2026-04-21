@@ -34,6 +34,7 @@ function App() {
   const [days, setDays] = useState(1)
   const logEndRef = useRef(null)
 
+  // Use dynamic URL for Windows stability
   const API_URL = `http://${window.location.hostname}:8000`
 
   useEffect(() => {
@@ -74,7 +75,7 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/config`)
       const data = await res.json()
-      setEditablePaths(data.paths)
+      setEditablePaths(data.paths || {})
       setFavoriteArtists(data.favorite_artists || [])
       setPaidRules(data.paid_rules || [])
       setDayTemplates(data.day_templates || {})
@@ -111,7 +112,7 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/sync`, { method: 'POST' })
       if (!res.ok) throw new Error("Sistema já está processando.")
-      alert("Sincronização iniciada! Acompanhe o progresso no Painel (Console).")
+      alert("Sincronização iniciada! Acompanhe o progresso no Painel.")
     } catch (e) {
       alert(e.message)
       setIsBusy(false)
@@ -135,6 +136,7 @@ function App() {
   }
 
   const handleSaveConfig = async () => {
+    setIsBusy(true)
     try {
       const res = await fetch(`${API_URL}/config`, {
         method: 'POST',
@@ -148,11 +150,13 @@ function App() {
         })
       })
       if (res.ok) {
-        alert("Configurações salvas com sucesso!")
-        fetchConfig()
+        alert("✅ Configurações salvas com sucesso!")
+        await fetchConfig()
       }
     } catch (e) {
-      alert("Erro ao salvar: " + e.message)
+      alert("❌ Erro ao salvar: " + e.message)
+    } finally {
+      setIsBusy(false)
     }
   }
 
@@ -160,7 +164,10 @@ function App() {
     setCurrentTrack(track)
     if (audioRef.current) {
       audioRef.current.src = `${API_URL}/stream/${track.id}`
-      audioRef.current.play()
+      audioRef.current.play().catch(e => {
+        console.error("Erro no player:", e)
+        alert("Erro ao reproduzir. Verifique se o arquivo está acessível na rede.")
+      })
     }
   }
 
@@ -306,10 +313,10 @@ function App() {
           <button 
             onClick={handleSync} 
             className={`primary ${isBusy ? 'pulse' : ''}`} 
-            style={{padding: '0.5rem 1rem', fontSize: '0.8rem'}}
+            style={{padding: '0.5rem 1rem', fontSize: '0.8rem', width: 'auto'}}
             disabled={isBusy}
           >
-            {isBusy ? 'SINCRONIZANDO...' : 'SINCRONIZAR ARQUIVOS'}
+            {isBusy ? 'PROCESSANDO...' : 'SINCRONIZAR ARQUIVOS'}
           </button>
           <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.5rem 1rem'}}><RefreshCw size={16}/></button>
         </div>
@@ -443,7 +450,9 @@ function App() {
         </div>
       </section>
 
-      <button className="primary" onClick={handleSaveConfig} style={{marginTop: '2rem'}}>SALVAR TUDO</button>
+      <button className="primary" onClick={handleSaveConfig} style={{marginTop: '2rem'}} disabled={isBusy}>
+        {isBusy ? "SALVANDO..." : "SALVAR TUDO"}
+      </button>
     </div>
   )
 
@@ -456,10 +465,10 @@ function App() {
         <div className="code-block">Score = Descanso * Peso * Mult_Artista * Dayparting</div>
         
         <h3 style={{marginTop: '2rem'}}>2. Wildcards (Surpresas)</h3>
-        <p>Permite que uma categoria substitua outra aleatoriamente (ex: B vira C). A música substituta também respeita o Scoring.</p>
+        <p>Permite que uma categoria substitua outra aleatoriamente (ex: B vira C).</p>
         
         <h3 style={{marginTop: '2rem'}}>3. BPM e Energia</h3>
-        <p>O motor evita a sucessão de músicas lentas (&lt; 80 BPM) para manter a energia da rádio.</p>
+        <p>O motor evita a sucessão de músicas lentas (&lt; 80 BPM).</p>
       </div>
     </div>
   )
