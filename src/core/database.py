@@ -160,10 +160,9 @@ class DatabaseManager:
         
         return stats
 
-    def get_music_path(self, music_id):
-        """Retorna o caminho físico de uma música pelo ID."""
-        cursor = self.conn.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (music_id,))
-        row = cursor.fetchone()
-        return row[0] if row else None
+    def update_weight(self, track_id, weight):
+        """Atualiza o multiplicador de peso de uma música específica."""
+        self.conn.execute("UPDATE biblioteca SET peso_especifico = ? WHERE id = ?", (weight, track_id))
+        self.conn.commit()
 
 db = DatabaseManager()

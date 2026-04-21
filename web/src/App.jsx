@@ -25,9 +25,12 @@ function App() {
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
+  const [bpmEnergy, setBpmEnergy] = useState('')
   
   // Player State
   const [currentTrack, setCurrentTrack] = useState(null)
+  const [audioUrl, setAudioUrl] = useState(null)
+  const [isPlayerLoading, setIsPlayerLoading] = useState(false)
   const audioRef = useRef(null)
 
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -163,14 +166,39 @@ function App() {
     }
   }
 
-  const playTrack = (track) => {
+  const playTrack = async (track) => {
     setCurrentTrack(track)
-    if (audioRef.current) {
-      audioRef.current.src = `${API_URL}/stream/${track.id}`
-      audioRef.current.play().catch(e => {
-        console.error("Erro no player:", e)
-      })
+    setIsPlayerLoading(true)
+    if (audioUrl) URL.revokeObjectURL(audioUrl)
+    
+    try {
+      const res = await fetch(`${API_URL}/stream/${track.id}`)
+      if (!res.ok) throw new Error("Falha no acesso ao arquivo de rede")
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      setAudioUrl(url)
+      if (audioRef.current) {
+        audioRef.current.src = url
+        audioRef.current.play()
+      }
+    } catch (e) {
+      console.error("Erro no player:", e)
+      alert("Erro ao carregar áudio. Verifique se a rede está acessível.")
+    } finally {
+      setIsPlayerLoading(false)
     }
+  }
+
+  const handleUpdateWeight = async (trackId, newWeight) => {
+    try {
+      await fetch(`${API_URL}/library/${trackId}/weight`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weight: parseFloat(newWeight) })
+      })
+      // Update local state to avoid refresh
+      setLibrary(library.map(t => t.id === trackId ? {...t, peso: parseFloat(newWeight)} : t))
+    } catch (e) { console.error(e) }
   }
 
   // Filter Logic
@@ -178,7 +206,13 @@ function App() {
     const matchesSearch = (track.artista || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
                           (track.nome || "").toLowerCase().includes(searchTerm.toLowerCase())
     const matchesCategory = filterCategory === '' || track.categoria === filterCategory
-    return matchesSearch && matchesCategory
+    
+    let matchesBpm = true
+    if (bpmEnergy === 'L') matchesBpm = track.bpm < 80
+    if (bpmEnergy === 'M') matchesBpm = track.bpm >= 80 && track.bpm <= 120
+    if (bpmEnergy === 'H') matchesBpm = track.bpm > 120
+    
+    return matchesSearch && matchesCategory && matchesBpm
   })
 
   const addArtist = () => {
@@ -320,12 +354,12 @@ function App() {
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '1rem', flexWrap: 'wrap'}}>
         <h2 className="card-title" style={{margin: 0}}><Database size={20}/> Biblioteca ({filteredLibrary.length})</h2>
         
-        <div style={{display: 'flex', gap: '1rem', flex: 1, minWidth: '300px'}}>
+        <div style={{display: 'flex', gap: '1rem', flex: 1, minWidth: '400px'}}>
           <div style={{position: 'relative', flex: 1}}>
             <Search size={16} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5}}/>
             <input 
               type="text" 
-              placeholder="Buscar artista ou música..." 
+              placeholder="Buscar..." 
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               style={{padding: '0.6rem 1rem 0.6rem 2.5rem', fontSize: '0.85rem', width: '100%'}}
@@ -334,12 +368,22 @@ function App() {
           <select 
             value={filterCategory} 
             onChange={e => setFilterCategory(e.target.value)}
-            style={{padding: '0.6rem', width: '180px', fontSize: '0.85rem'}}
+            style={{padding: '0.6rem', width: '150px', fontSize: '0.85rem'}}
           >
-            <option value="">Todas Categorias</option>
+            <option value="">Todas Pastas</option>
             {[...new Set(library.map(t => t.categoria))].map(cat => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
+          </select>
+          <select 
+            value={bpmEnergy} 
+            onChange={e => setBpmEnergy(e.target.value)}
+            style={{padding: '0.6rem', width: '130px', fontSize: '0.85rem'}}
+          >
+            <option value="">Energia (BPM)</option>
+            <option value="L">Baixa (L)</option>
+            <option value="M">Média (M)</option>
+            <option value="H">Alta (H)</option>
           </select>
         </div>
 
@@ -350,7 +394,7 @@ function App() {
             style={{padding: '0.6rem 1.2rem', fontSize: '0.85rem', width: 'auto'}}
             disabled={isBusy}
           >
-            {isBusy ? 'PROCESSANDO...' : 'SINCRONIZAR'}
+            {isBusy ? '...' : 'SINCRONIZAR'}
           </button>
           <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.6rem 1rem'}}><RefreshCw size={16}/></button>
         </div>
@@ -361,18 +405,19 @@ function App() {
           <thead>
             <tr style={{background: 'none'}}>
               <th style={{width: '60px', textAlign: 'left', padding: '1rem'}}>PLAY</th>
-              <th style={{width: '200px', textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
+              <th style={{width: '180px', textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
               <th style={{textAlign: 'left', padding: '1rem'}}>MÚSICA</th>
-              <th style={{width: '150px', textAlign: 'left', padding: '1rem'}}>CATEGORIA</th>
+              <th style={{width: '120px', textAlign: 'left', padding: '1rem'}}>CATEGORIA</th>
               <th style={{width: '80px', textAlign: 'left', padding: '1rem'}}>BPM</th>
+              <th style={{width: '100px', textAlign: 'left', padding: '1rem'}}>PESO</th>
             </tr>
           </thead>
           <tbody>
             {filteredLibrary.map((track) => (
               <tr key={track.id}>
                 <td>
-                  <button className="play-btn" onClick={() => playTrack(track)}>
-                    <Play size={14} fill="currentColor"/>
+                  <button className="play-btn" onClick={() => playTrack(track)} disabled={isPlayerLoading}>
+                    {isPlayerLoading && currentTrack?.id === track.id ? <RefreshCw size={14} className="pulse"/> : <Play size={14} fill="currentColor"/>}
                   </button>
                 </td>
                 <td style={{fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={track.artista}>{track.artista}</td>
@@ -380,6 +425,15 @@ function App() {
                 <td><span className="badge" style={{background: 'rgba(255,255,255,0.05)'}}>{track.categoria}</span></td>
                 <td style={{color: track.bpm > 120 ? 'var(--error)' : track.bpm < 80 ? 'var(--accent-color)' : 'var(--success)'}}>
                   {Math.round(track.bpm)}
+                </td>
+                <td>
+                  <input 
+                    type="number" 
+                    step="0.1" 
+                    defaultValue={track.peso || 1.0} 
+                    onBlur={e => handleUpdateWeight(track.id, e.target.value)}
+                    style={{padding: '0.3rem', width: '60px', fontSize: '0.8rem', textAlign: 'center'}}
+                  />
                 </td>
               </tr>
             ))}
@@ -498,7 +552,7 @@ function App() {
 
   const renderGuide = () => (
     <div className="guide-content glass card">
-      <h2 className="card-title"><BookOpen size={20}/> Manual Técnico v3.2</h2>
+      <h2 className="card-title"><BookOpen size={20}/> Manual Técnico v3.3</h2>
       <div style={{padding: '1rem'}}>
         <h3>1. Lógica de Scoring</h3>
         <p>O score prioriza músicas com maior tempo de descanso e artistas favoritos.</p>
@@ -517,7 +571,7 @@ function App() {
     <div className="app-container">
       <header style={{textAlign: 'center', marginBottom: '2rem'}}>
         <h1>GERADOR POP FM</h1>
-        <p className="subtitle">OS_SYSTEM_AUTOMATION_v3.2.1</p>
+        <p className="subtitle">OS_SYSTEM_AUTOMATION_v3.3.0</p>
       </header>
 
       <nav className="nav-tabs">

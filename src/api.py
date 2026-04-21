@@ -85,8 +85,7 @@ def get_stats():
         return {"categories": [], "top_artists": []}
     return db.get_stats()
 
-from fastapi.responses import StreamingResponse
-import mimetypes
+import shutil
 
 @app.get("/stream/{track_id}")
 def stream_audio(track_id: int):
@@ -96,26 +95,49 @@ def stream_audio(track_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Música não encontrada")
     
-    path = row[0].replace('/', '\\')
-    if not os.path.exists(path):
-        add_log(f"⚠️ Erro de acesso ao arquivo: {path}")
+    source_path = row[0].replace('/', '\\')
+    if not os.path.exists(source_path):
+        add_log(f"⚠️ Arquivo inacessível: {source_path}")
         raise HTTPException(status_code=404, detail="Arquivo físico inacessível")
 
-    def iterfile():
-        try:
-            with open(path, mode="rb") as file_like:
-                while chunk := file_like.read(1024 * 1024):
-                    yield chunk
-        except Exception as e:
-            add_log(f"❌ Falha ao ler arquivo de rede: {e}")
-
-    media_type, _ = mimetypes.guess_type(path)
-    return StreamingResponse(iterfile(), media_type=media_type or "audio/mpeg")
+    # Estratégia de Fuga de Rede: Copia para local antes de tocar
+    temp_dir = "web/public/temp_stream"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    ext = os.path.splitext(source_path)[1]
+    temp_filename = f"track_{track_id}{ext}"
+    local_path = os.path.join(temp_dir, temp_filename)
+    
+    try:
+        if not os.path.exists(local_path):
+            shutil.copy2(source_path, local_path)
+        
+        # Retorna o arquivo local que o navegador consegue ler sem problemas de rede
+        return FileResponse(local_path)
+    except Exception as e:
+        add_log(f"❌ Falha ao copiar para streaming local: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao preparar áudio")
 
 @app.get("/library")
 def get_library():
-    cursor = db.conn.execute("SELECT id, nome_musica, artista, pasta_categoria, bpm FROM biblioteca ORDER BY artista ASC")
-    return [{"id": r[0], "nome": r[1], "artista": r[2], "categoria": r[3], "bpm": r[4]} for r in cursor.fetchall()]
+    cursor = db.conn.execute("SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico FROM biblioteca ORDER BY artista ASC")
+    return [
+        {
+            "id": r[0], 
+            "nome": r[1], 
+            "artista": r[2], 
+            "categoria": r[3], 
+            "bpm": r[4],
+            "peso": r[5]
+        } for r in cursor.fetchall()
+    ]
+
+@app.put("/library/{track_id}/weight")
+def update_track_weight(track_id: int, weight: float = Body(..., embed=True)):
+    db.update_weight(track_id, weight)
+    return {"status": "updated"}
+
+from fastapi import Body
 
 # --- Tasks de Segundo Plano ---
 
@@ -149,10 +171,11 @@ def run_sync_task():
             add_log(f"Erro: Raiz de musicas nao encontrada em {music_root}")
             return
         
-        categories = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d))]
+        # Filtra pastas de sistema e ocultas (começam com $)
+        categories = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d)) and not d.startswith('$')]
+        
         for cat in categories:
             folder_path = os.path.join(music_root, cat)
-            add_log(f"--- Escaneando: {cat} ---")
             engine.sync_folder_to_db(folder_path, cat)
         add_log("Sincronizacao concluida!")
     except Exception as e:
