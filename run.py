@@ -32,11 +32,9 @@ def run_app():
     # 2. Iniciar o Frontend (Vite)
     print("  [2/2] Iniciando interface web...")
     frontend_proc = subprocess.Popen(
-        ["npm", "run", "dev"],
+        ["npm", "run", "dev", "--", "--host", "127.0.0.1"],
         cwd=os.path.join(os.getcwd(), "web"),
-        shell=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        shell=True
     )
 
     print("\n✅ Ambiente pronto!")
