@@ -96,13 +96,16 @@ def stream_audio(track_id: int):
     cursor = db.conn.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (track_id,))
     row = cursor.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="Música não encontrada")
+        raise HTTPException(status_code=404, detail="Música não encontrada no banco")
     
     source_path = row[0].replace('/', '\\')
+    print(f"--- [DEBUG] Tentando tocar: {source_path}") # Log vital para sabermos se o arquivo existe
+    
     if not os.path.exists(source_path):
+        print(f"--- [ERRO] Arquivo nao encontrado: {source_path}")
+        add_log(f"⚠️ Arquivo físico não encontrado: {source_path}")
         raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
 
-    # FileResponse é o padrão ouro: suporta Range, Streaming e é instantâneo
     return FileResponse(source_path)
 
 @app.get("/library")
