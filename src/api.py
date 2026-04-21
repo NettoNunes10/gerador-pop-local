@@ -85,23 +85,31 @@ def get_stats():
         return {"categories": [], "top_artists": []}
     return db.get_stats()
 
+from fastapi.responses import StreamingResponse
+import mimetypes
+
 @app.get("/stream/{track_id}")
 def stream_audio(track_id: int):
     cursor = db.conn.cursor()
     cursor.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (track_id,))
     row = cursor.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="Música não encontrada no banco")
+        raise HTTPException(status_code=404, detail="Música não encontrada")
     
-    path = row[0]
+    path = row[0].replace('/', '\\')
     if not os.path.exists(path):
-        # Tenta normalizar caminhos de rede Windows
-        path = path.replace('/', '\\')
-        if not os.path.exists(path):
-            add_log(f"⚠️ Arquivo não encontrado no disco: {path}")
-            raise HTTPException(status_code=404, detail=f"Arquivo físico não encontrado: {path}")
-            
-    return FileResponse(path, media_type="audio/mpeg")
+        add_log(f"⚠️ Erro de acesso ao arquivo: {path}")
+        raise HTTPException(status_code=404, detail="Arquivo físico inacessível")
+
+    def iterfile():
+        try:
+            with open(path, mode="rb") as file_like:
+                yield from file_like
+        except Exception as e:
+            add_log(f"❌ Falha ao ler arquivo de rede: {e}")
+
+    media_type, _ = mimetypes.guess_type(path)
+    return StreamingResponse(iterfile(), media_type=media_type or "audio/mpeg")
 
 @app.get("/library")
 def get_library():
