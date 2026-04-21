@@ -42,6 +42,9 @@ class ConfigManager:
             except:
                 pass
 
+    def get_path(self, key):
+        return self.paths.get(key, "")
+
     def save(self, new_config=None):
         if new_config:
             if 'paths' in new_config:

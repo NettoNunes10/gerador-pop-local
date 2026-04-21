@@ -34,7 +34,7 @@ function App() {
   const [days, setDays] = useState(1)
   const logEndRef = useRef(null)
 
-  const API_URL = 'http://127.0.0.1:8000'
+  const API_URL = 'http://localhost:8000'
 
   useEffect(() => {
     fetchStatus()
