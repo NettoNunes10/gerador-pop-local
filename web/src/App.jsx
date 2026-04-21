@@ -48,7 +48,7 @@ function App() {
     return tomorrow.toISOString().split('T')[0]
   })
   const [days, setDays] = useState(1)
-  const logEndRef = useRef(null)
+  const logContainerRef = useRef(null)
 
   const API_URL = `http://${window.location.hostname}:8000`
 
@@ -66,7 +66,8 @@ function App() {
   }, [])
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = logContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [logs])
 
   const fetchStatus = async () => {
@@ -369,14 +370,13 @@ function App() {
       </div>
 
       <section className="glass" style={{padding: '0'}}>
-        <div className="log-container">
+        <div className="log-container" ref={logContainerRef}>
           <div style={{color: 'var(--accent-color)', fontWeight: 800, marginBottom: '1rem'}}>CONSOLE_SYSTEM_OUTPUT_v3.0</div>
           {logs.map((log, i) => (
             <div key={i} className="log-entry">
-              <span style={{opacity: 0.4}}>{">"}</span> {log}
+              <span style={{opacity: 0.4}}>{'>'}</span> {log}
             </div>
           ))}
-          <div ref={logEndRef} />
         </div>
       </section>
     </div>
