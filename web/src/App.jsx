@@ -314,15 +314,15 @@ function App() {
           <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.5rem 1rem'}}><RefreshCw size={16}/></button>
         </div>
       </div>
-      <div style={{overflowY: 'auto', maxHeight: '600px'}}>
-        <table className="lib-table">
+      <div style={{overflowY: 'auto', overflowX: 'hidden', maxHeight: '600px'}}>
+        <table className="lib-table" style={{tableLayout: 'fixed'}}>
           <thead>
             <tr style={{background: 'none'}}>
-              <th style={{textAlign: 'left', padding: '1rem'}}>PLAY</th>
-              <th style={{textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
+              <th style={{width: '60px', textAlign: 'left', padding: '1rem'}}>PLAY</th>
+              <th style={{width: '200px', textAlign: 'left', padding: '1rem'}}>ARTISTA</th>
               <th style={{textAlign: 'left', padding: '1rem'}}>MÚSICA</th>
-              <th style={{textAlign: 'left', padding: '1rem'}}>CATEGORIA</th>
-              <th style={{textAlign: 'left', padding: '1rem'}}>BPM</th>
+              <th style={{width: '150px', textAlign: 'left', padding: '1rem'}}>CATEGORIA</th>
+              <th style={{width: '80px', textAlign: 'left', padding: '1rem'}}>BPM</th>
             </tr>
           </thead>
           <tbody>
@@ -333,8 +333,8 @@ function App() {
                     <Play size={14} fill="currentColor"/>
                   </button>
                 </td>
-                <td style={{fontWeight: 700}}>{track.artista}</td>
-                <td>{track.nome}</td>
+                <td style={{fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{track.artista}</td>
+                <td style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{track.nome}</td>
                 <td><span className="badge" style={{background: 'rgba(255,255,255,0.05)'}}>{track.categoria}</span></td>
                 <td style={{color: track.bpm > 120 ? 'var(--error)' : track.bpm < 80 ? 'var(--accent-color)' : 'var(--success)'}}>
                   {Math.round(track.bpm)}
