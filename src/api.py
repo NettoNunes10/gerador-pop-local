@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -137,7 +137,6 @@ def update_track_weight(track_id: int, weight: float = Body(..., embed=True)):
     db.update_weight(track_id, weight)
     return {"status": "updated"}
 
-from fastapi import Body
 
 # --- Tasks de Segundo Plano ---
 
