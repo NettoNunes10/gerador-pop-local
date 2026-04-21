@@ -24,14 +24,19 @@ class DatabaseManager:
                 pasta_categoria TEXT,
                 sub_categoria TEXT,
                 bpm REAL,
-                peso_especifico REAL DEFAULT 1.0
+                peso_especifico REAL DEFAULT 1.0,
+                data_arquivo TEXT
             )
         ''')
-        # Garantir coluna sub_categoria para bancos existentes
-        try:
-            cursor.execute("ALTER TABLE biblioteca ADD COLUMN sub_categoria TEXT")
-        except:
-            pass
+        # Migração: garantir colunas para bancos existentes
+        for col_def in [
+            "ALTER TABLE biblioteca ADD COLUMN sub_categoria TEXT",
+            "ALTER TABLE biblioteca ADD COLUMN data_arquivo TEXT"
+        ]:
+            try:
+                cursor.execute(col_def)
+            except:
+                pass
 
         # Tabela artistas_favoritos
         cursor.execute('''
@@ -59,19 +64,20 @@ class DatabaseManager:
         
         self.conn.commit()
 
-    def add_to_library(self, filepath, artists, title, category, bpm, subcat='MED'):
+    def add_to_library(self, filepath, artists, title, category, bpm, subcat='STD', data_arquivo=None):
         """Adiciona ou atualiza uma música na biblioteca."""
         try:
             self.conn.execute('''
-                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(caminho_arquivo) DO UPDATE SET
                     artista=excluded.artista,
                     nome_musica=excluded.nome_musica,
                     pasta_categoria=excluded.pasta_categoria,
                     bpm=excluded.bpm,
-                    sub_categoria=excluded.sub_categoria
-            ''', (filepath, artists, title, category, bpm, subcat))
+                    sub_categoria=excluded.sub_categoria,
+                    data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
+            ''', (filepath, artists, title, category, bpm, subcat, data_arquivo))
             self.conn.commit()
         except Exception as e:
             print(f"Erro ao adicionar à biblioteca: {e}")

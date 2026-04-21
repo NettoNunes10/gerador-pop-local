@@ -34,6 +34,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [bpmEnergy, setBpmEnergy] = useState('')
+  const [sortBy, setSortBy] = useState('artista')
   
   // Player State
   const [currentTrack, setCurrentTrack] = useState(null)
@@ -261,20 +262,28 @@ function App() {
     }
   }
 
-  // Filter Logic
-  const filteredLibrary = library.filter(track => {
-    const matchesSearch = (track.artista || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (track.nome || "").toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = filterCategory === '' || track.categoria === filterCategory
-    const matchesGroup = filterGroup === '' || track.sub_categoria === filterGroup
-    
-    let matchesBpm = true
-    if (bpmEnergy === 'L') matchesBpm = track.bpm < 80
-    if (bpmEnergy === 'M') matchesBpm = track.bpm >= 80 && track.bpm <= 120
-    if (bpmEnergy === 'H') matchesBpm = track.bpm > 120
-    
-    return matchesSearch && matchesCategory && matchesBpm && matchesGroup
-  })
+  // Filter + Sort Logic
+  const filteredLibrary = library
+    .filter(track => {
+      const matchesSearch = (track.artista || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            (track.nome || "").toLowerCase().includes(searchTerm.toLowerCase())
+      const matchesCategory = filterCategory === '' || track.categoria === filterCategory
+      const matchesGroup = filterGroup === '' || track.sub_categoria === filterGroup
+      
+      let matchesBpm = true
+      if (bpmEnergy === 'L') matchesBpm = track.bpm < 80
+      if (bpmEnergy === 'M') matchesBpm = track.bpm >= 80 && track.bpm <= 120
+      if (bpmEnergy === 'H') matchesBpm = track.bpm > 120
+      
+      return matchesSearch && matchesCategory && matchesBpm && matchesGroup
+    })
+    .sort((a, b) => {
+      if (sortBy === 'artista') return (a.artista || '').localeCompare(b.artista || '', 'pt-BR')
+      if (sortBy === 'nome') return (a.nome || '').localeCompare(b.nome || '', 'pt-BR')
+      if (sortBy === 'data_desc') return (b.data_arquivo || '').localeCompare(a.data_arquivo || '')
+      if (sortBy === 'data_asc') return (a.data_arquivo || '').localeCompare(b.data_arquivo || '')
+      return 0
+    })
 
   const addArtist = () => {
     const artist = prompt("Nome do Artista:")
@@ -453,6 +462,16 @@ function App() {
           >
             <option value="">Grupo</option>
             {rotationGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+          </select>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            style={{padding: '0.6rem', width: '155px', fontSize: '0.85rem'}}
+          >
+            <option value="artista">Artista (A→Z)</option>
+            <option value="nome">Música (A→Z)</option>
+            <option value="data_desc">Mais Recente</option>
+            <option value="data_asc">Mais Antiga</option>
           </select>
         </div>
 

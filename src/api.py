@@ -121,7 +121,7 @@ def stream_audio(track_id: int):
 
 @app.get("/library")
 def get_library():
-    cursor = db.conn.execute("SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria FROM biblioteca ORDER BY artista ASC")
+    cursor = db.conn.execute("SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca ORDER BY artista ASC")
     return [
         {
             "id": r[0], 
@@ -130,7 +130,8 @@ def get_library():
             "categoria": r[3], 
             "bpm": r[4],
             "peso": r[5],
-            "sub_categoria": r[6]
+            "sub_categoria": r[6],
+            "data_arquivo": r[7]
         } for r in cursor.fetchall()
     ]
 

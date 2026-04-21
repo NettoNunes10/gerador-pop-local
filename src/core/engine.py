@@ -117,9 +117,14 @@ class PlaylistEngine:
                     artists, title = self.parse_artist_title(f)
                     bpm = analyzer.get_bpm(full_path)
                     
-                    # Se for novo (não tem row), usa 'MED' como padrão
-                    subcat = row[1] if row else 'MED'
-                    db.add_to_library(full_path, ", ".join(artists), title, category, bpm, subcat)
+                    # Captura data de criação do arquivo no Windows (ctime)
+                    import datetime as dt
+                    ctime = os.path.getctime(full_path)
+                    data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
+                    
+                    # Se for novo (sem row), usa STD como padrão
+                    subcat = row[1] if row else 'STD'
+                    db.add_to_library(full_path, ", ".join(artists), title, category, bpm, subcat, data_arquivo)
         except Exception as e:
             self.log(f"Erro ao sincronizar pasta {category}: {str(e)}")
 
