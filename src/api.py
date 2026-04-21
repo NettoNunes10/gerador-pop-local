@@ -141,21 +141,21 @@ async def run_generation_task(start_date_str: str, days: int):
 async def run_sync_task():
     state.is_busy = True
     state.logs = []
-    add_log("🚀 Iniciando Sincronização Geral da Biblioteca...")
+    add_log("Iniciando Sincronizacao Geral da Biblioteca...")
     try:
         engine = PlaylistEngine(log_callback=add_log)
         music_root = config.get_path('MUSIC_ROOT')
         if not os.path.exists(music_root):
-            add_log(f"❌ Erro: Raiz de músicas não encontrada em {music_root}")
+            add_log(f"Erro: Raiz de musicas nao encontrada em {music_root}")
             return
         categories = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d))]
         for cat in categories:
             folder_path = os.path.join(music_root, cat)
             add_log(f"--- Escaneando: {cat} ---")
             engine.sync_folder_to_db(folder_path, cat)
-        add_log("✨ Sincronização concluída!")
+        add_log("Sincronizacao concluida!")
     except Exception as e:
-        add_log(f"❌ Erro na sincronização: {str(e)}")
+        add_log(f"Erro na sincronizacao: {str(e)}")
         logger.exception("Falha no sync")
     finally:
         state.is_busy = False

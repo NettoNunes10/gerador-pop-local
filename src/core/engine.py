@@ -77,13 +77,16 @@ class PlaylistEngine:
 
     def sync_folder_to_db(self, folder_path, category):
         """Verifica arquivos novos na pasta e adiciona ao banco com BPM."""
+        if category.startswith('$') or 'RECYCLE.BIN' in category:
+            return
+            
         valid_exts = ('.mp3', '.flac', '.wav')
         try:
             files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
             total = len(files)
             if total == 0: return
             
-            self.log(f"📂 Pasta '{category}': {total} arquivos encontrados.")
+            self.log(f"Pasta '{category}': {total} arquivos encontrados.")
             
             for index, f in enumerate(files):
                 full_path = os.path.join(folder_path, f).replace('/', '\\')
@@ -94,12 +97,12 @@ class PlaylistEngine:
                 row = cursor.fetchone()
                 
                 if not row or row[0] == 0:
-                    self.log(f"[{index+1}/{total}] 🔍 Analisando: {f}...")
+                    self.log(f"[{index+1}/{total}] Analisando: {f}...")
                     artists, title = self.parse_artist_title(f)
                     bpm = analyzer.get_bpm(full_path)
                     db.add_to_library(full_path, ", ".join(artists), title, category, bpm)
         except Exception as e:
-            self.log(f"⚠️ Erro ao sincronizar pasta {category}: {e}")
+            self.log(f"Erro ao sincronizar pasta {category}: {str(e)}")
 
     def select_music(self, folder_path, category, current_hour):
         # Lógica de Surpresa (Wildcard Idea 1)
