@@ -91,23 +91,6 @@ import shutil
 from fastapi.responses import StreamingResponse
 from typing import Optional
 
-@app.get("/stream/{track_id}")
-def stream_audio(track_id: int):
-    cursor = db.conn.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (track_id,))
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Música não encontrada no banco")
-    
-    source_path = row[0].replace('/', '\\')
-    print(f"--- [DEBUG] Tentando tocar: {source_path}") # Log vital para sabermos se o arquivo existe
-    
-    if not os.path.exists(source_path):
-        print(f"--- [ERRO] Arquivo nao encontrado: {source_path}")
-        add_log(f"⚠️ Arquivo físico não encontrado: {source_path}")
-        raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
-
-    return FileResponse(source_path)
-
 @app.get("/library")
 def get_library(
     page: int = 1,
@@ -118,6 +101,10 @@ def get_library(
     bpm: Optional[str] = None,
     sort: str = "artista"
 ):
+    # Base URL para o servidor de áudio dedicado
+    AUDIO_SERVER_URL = "http://127.0.0.1:8001"
+    music_root = config.get_path('MUSIC_ROOT')
+
     # Construção dinâmica da query com filtros
     conditions = []
     params = []
@@ -158,18 +145,30 @@ def get_library(
     # Registros da página
     offset = (page - 1) * limit
     rows = db.conn.execute(
-        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
+        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo, caminho_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
         params + [limit, offset]
     ).fetchall()
 
-    return {
-        "items": [
-            {
+    items = []
+    for r in rows:
+        try:
+            full_path = r[8]
+            # Gera o caminho relativo para o servidor de áudio ( Porta 8001 )
+            rel_path = os.path.relpath(full_path, music_root).replace('\\', '/')
+            encoded_rel = urllib.parse.quote(rel_path, safe='/')
+            audio_url = f"{AUDIO_SERVER_URL}/{encoded_rel}"
+            
+            items.append({
                 "id": r[0], "nome": r[1], "artista": r[2],
                 "categoria": r[3], "bpm": r[4], "peso": r[5],
-                "sub_categoria": r[6], "data_arquivo": r[7]
-            } for r in rows
-        ],
+                "sub_categoria": r[6], "data_arquivo": r[7],
+                "audio_url": audio_url
+            })
+        except:
+            continue
+
+    return {
+        "items": items,
         "total": total,
         "page": page,
         "pages": max(1, -(-total // limit))

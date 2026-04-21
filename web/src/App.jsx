@@ -254,11 +254,9 @@ function App() {
     setCurrentTrack(track)
     setIsPlayerLoading(true)
     
-    // Voltamos para o endpoint seguro /stream/{id}
-    const directUrl = `${API_URL}/stream/${track.id}`
-    
-    if (audioRef.current) {
-      audioRef.current.src = directUrl
+    // Agora usamos a URL do servidor de áudio dedicado (Porta 8001)
+    if (audioRef.current && track.audio_url) {
+      audioRef.current.src = track.audio_url
       audioRef.current.load()
       audioRef.current.play()
         .then(() => setIsPlayerLoading(false))
