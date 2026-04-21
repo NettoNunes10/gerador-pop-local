@@ -1,18 +1,34 @@
 import sqlite3
 import datetime
 import os
+import threading
 from .config import config
 
 DB_PATH = "base_dados_radio.db"
 
 class DatabaseManager:
     def __init__(self):
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self._create_tables()
+        self._local = threading.local()
+        # Cria as tabelas usando uma conexão inicial temporária
+        conn = self._get_conn()
+        self._create_tables(conn)
 
-    def _create_tables(self):
-        cursor = self.conn.cursor()
+    def _get_conn(self):
+        """Retorna a conexão SQLite da thread atual (cria se não existir)."""
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")   # Permite leituras simultâneas
+            conn.execute("PRAGMA busy_timeout=5000")  # Espera até 5s antes de dar erro
+            self._local.conn = conn
+        return self._local.conn
+
+    @property
+    def conn(self):
+        return self._get_conn()
+
+    def _create_tables(self, conn):
+        cursor = conn.cursor()
         
         # Tabela biblioteca
         cursor.execute('''
@@ -62,7 +78,7 @@ class DatabaseManager:
             for artist in config.favorite_artists:
                 cursor.execute("INSERT OR IGNORE INTO artistas_favoritos (nome_artista, multiplicador) VALUES (?, ?)", (artist, 1.5))
         
-        self.conn.commit()
+        conn.commit()
 
     def add_to_library(self, filepath, artists, title, category, bpm, subcat='STD', data_arquivo=None):
         """Adiciona ou atualiza uma música na biblioteca."""
@@ -84,8 +100,7 @@ class DatabaseManager:
 
     def log_execution(self, filepath):
         now = datetime.datetime.now()
-        cursor = self.conn.cursor()
-        cursor.execute('''
+        self.conn.execute('''
             INSERT INTO historico_execucao (caminho_arquivo, data_hora, dia_semana)
             VALUES (?, ?, ?)
         ''', (filepath, now, now.weekday()))
@@ -94,6 +109,11 @@ class DatabaseManager:
     def update_subcategory(self, track_id, subcat):
         """Atualiza a subcategoria (tag) de uma música."""
         self.conn.execute("UPDATE biblioteca SET sub_categoria = ? WHERE id = ?", (subcat, track_id))
+        self.conn.commit()
+
+    def update_weight(self, track_id, weight):
+        """Atualiza o multiplicador de peso de uma música específica."""
+        self.conn.execute("UPDATE biblioteca SET peso_especifico = ? WHERE id = ?", (weight, track_id))
         self.conn.commit()
 
     def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_bpm=0, min_rest_hours=4):
@@ -169,6 +189,8 @@ class DatabaseManager:
                 best_score = score
                 best_candidate = cand
 
+        return best_candidate  # ← Bug corrigido: return estava faltando!
+
     def get_stats(self):
         """Retorna estatísticas para os gráficos do Dashboard."""
         stats = {}
@@ -181,10 +203,5 @@ class DatabaseManager:
         stats['top_artists'] = [{'name': r[0], 'value': r[1]} for r in cursor.fetchall()]
         
         return stats
-
-    def update_weight(self, track_id, weight):
-        """Atualiza o multiplicador de peso de uma música específica."""
-        self.conn.execute("UPDATE biblioteca SET peso_especifico = ? WHERE id = ?", (weight, track_id))
-        self.conn.commit()
 
 db = DatabaseManager()
