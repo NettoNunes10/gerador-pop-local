@@ -3,7 +3,7 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer, 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip 
 } from 'recharts'
-import { Play, Pause, BarChart2, Music, Settings, BookOpen, Layout, Database, RefreshCw, X } from 'lucide-react'
+import { Play, Pause, BarChart2, Music, Settings, BookOpen, Layout, Database, RefreshCw, X, Search } from 'lucide-react'
 import './index.css'
 
 const COLORS = ['#00f2ff', '#bc13fe', '#00ffaa', '#ff2d55', '#ffaa00'];
@@ -21,6 +21,8 @@ function App() {
   const [stats, setStats] = useState({ categories: [], top_artists: [] })
   const [logs, setLogs] = useState([])
   const [isBusy, setIsBusy] = useState(false)
+  
+  // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   
@@ -36,7 +38,6 @@ function App() {
   const [days, setDays] = useState(1)
   const logEndRef = useRef(null)
 
-  // Use dynamic URL for Windows stability
   const API_URL = `http://${window.location.hostname}:8000`
 
   useEffect(() => {
@@ -168,10 +169,17 @@ function App() {
       audioRef.current.src = `${API_URL}/stream/${track.id}`
       audioRef.current.play().catch(e => {
         console.error("Erro no player:", e)
-        alert("Erro ao reproduzir. Verifique se o arquivo está acessível na rede.")
       })
     }
   }
+
+  // Filter Logic
+  const filteredLibrary = library.filter(track => {
+    const matchesSearch = (track.artista || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          (track.nome || "").toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesCategory = filterCategory === '' || track.categoria === filterCategory
+    return matchesSearch && matchesCategory
+  })
 
   const addArtist = () => {
     const artist = prompt("Nome do Artista:")
@@ -309,20 +317,24 @@ function App() {
 
   const renderLibrary = () => (
     <div className="glass card">
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '1rem', flexWrap: 'wrap'}}>
         <h2 className="card-title" style={{margin: 0}}><Database size={20}/> Biblioteca ({filteredLibrary.length})</h2>
-        <div style={{display: 'flex', gap: '1rem', flex: 1, margin: '0 2rem'}}>
-          <input 
-            type="text" 
-            placeholder="Buscar artista ou música..." 
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            style={{padding: '0.5rem', fontSize: '0.8rem'}}
-          />
+        
+        <div style={{display: 'flex', gap: '1rem', flex: 1, minWidth: '300px'}}>
+          <div style={{position: 'relative', flex: 1}}>
+            <Search size={16} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5}}/>
+            <input 
+              type="text" 
+              placeholder="Buscar artista ou música..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              style={{padding: '0.6rem 1rem 0.6rem 2.5rem', fontSize: '0.85rem', width: '100%'}}
+            />
+          </div>
           <select 
             value={filterCategory} 
             onChange={e => setFilterCategory(e.target.value)}
-            style={{padding: '0.5rem', width: '200px', fontSize: '0.8rem'}}
+            style={{padding: '0.6rem', width: '180px', fontSize: '0.85rem'}}
           >
             <option value="">Todas Categorias</option>
             {[...new Set(library.map(t => t.categoria))].map(cat => (
@@ -330,18 +342,20 @@ function App() {
             ))}
           </select>
         </div>
+
         <div style={{display: 'flex', gap: '1rem'}}>
           <button 
             onClick={handleSync} 
             className={`primary ${isBusy ? 'pulse' : ''}`} 
-            style={{padding: '0.5rem 1rem', fontSize: '0.8rem', width: 'auto'}}
+            style={{padding: '0.6rem 1.2rem', fontSize: '0.85rem', width: 'auto'}}
             disabled={isBusy}
           >
             {isBusy ? 'PROCESSANDO...' : 'SINCRONIZAR'}
           </button>
-          <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.5rem 1rem'}}><RefreshCw size={16}/></button>
+          <button onClick={fetchLibrary} className="secondary-btn" style={{padding: '0.6rem 1rem'}}><RefreshCw size={16}/></button>
         </div>
       </div>
+
       <div style={{overflowY: 'auto', overflowX: 'hidden', maxHeight: '600px'}}>
         <table className="lib-table" style={{tableLayout: 'fixed'}}>
           <thead>
@@ -361,8 +375,8 @@ function App() {
                     <Play size={14} fill="currentColor"/>
                   </button>
                 </td>
-                <td style={{fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{track.artista}</td>
-                <td style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{track.nome}</td>
+                <td style={{fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={track.artista}>{track.artista}</td>
+                <td style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={track.nome}>{track.nome}</td>
                 <td><span className="badge" style={{background: 'rgba(255,255,255,0.05)'}}>{track.categoria}</span></td>
                 <td style={{color: track.bpm > 120 ? 'var(--error)' : track.bpm < 80 ? 'var(--accent-color)' : 'var(--success)'}}>
                   {Math.round(track.bpm)}
@@ -371,6 +385,11 @@ function App() {
             ))}
           </tbody>
         </table>
+        {filteredLibrary.length === 0 && (
+          <div style={{textAlign: 'center', padding: '3rem', opacity: 0.5}}>
+            Nenhuma música encontrada com os filtros atuais.
+          </div>
+        )}
       </div>
     </div>
   )
@@ -479,7 +498,7 @@ function App() {
 
   const renderGuide = () => (
     <div className="guide-content glass card">
-      <h2 className="card-title"><BookOpen size={20}/> Manual Técnico v3.1</h2>
+      <h2 className="card-title"><BookOpen size={20}/> Manual Técnico v3.2</h2>
       <div style={{padding: '1rem'}}>
         <h3>1. Lógica de Scoring</h3>
         <p>O score prioriza músicas com maior tempo de descanso e artistas favoritos.</p>
@@ -498,7 +517,7 @@ function App() {
     <div className="app-container">
       <header style={{textAlign: 'center', marginBottom: '2rem'}}>
         <h1>GERADOR POP FM</h1>
-        <p className="subtitle">OS_SYSTEM_AUTOMATION_v3.1</p>
+        <p className="subtitle">OS_SYSTEM_AUTOMATION_v3.2.1</p>
       </header>
 
       <nav className="nav-tabs">
@@ -523,7 +542,7 @@ function App() {
             <div className="player-title">{currentTrack.nome}</div>
             <div className="player-artist">{currentTrack.artista}</div>
           </div>
-          <audio ref={audioRef} controls autoPlay />
+          <audio ref={audioRef} controls autoPlay style={{filter: 'invert(1)'}} />
           <button className="play-btn" style={{background: 'var(--error)'}} onClick={() => setCurrentTrack(null)}><X size={16}/></button>
         </div>
       )}
