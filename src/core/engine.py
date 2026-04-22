@@ -156,6 +156,7 @@ class PlaylistEngine:
         return 0
 
     def get_audio_duration(self, filepath):
+        try:
             from mutagen import File as MutagenFile
             audio = MutagenFile(filepath)
             if audio and audio.info:
