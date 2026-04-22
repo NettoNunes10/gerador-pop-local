@@ -155,72 +155,135 @@ class PlaylistEngine:
         except: pass
         return 0
 
+    def get_audio_duration(self, filepath):
+        try:
+            from mutagen import File as MutagenFile
+            audio = MutagenFile(filepath)
+            if audio and audio.info:
+                return int(round(audio.info.length * 1000))
+        except:
+            pass
+        return 3000
+
     def generate_schedule(self, date_str):
         self.is_busy = True
         try:
-            # 1. Identifica o modelo (.blm) pelo dia da semana
+            # 1. Configurações Iniciais
             date_obj = dt.datetime.strptime(date_str, "%Y%m%d")
-            weekday = str(date_obj.weekday())
-            template_name = config.day_templates.get(weekday)
+            weekday = date_obj.weekday()
             
-            if not template_name:
-                self.log(f"❌ Erro: Nenhum modelo configurado para o dia da semana {weekday}")
-                return
+            # Escolhe o modelo baseado no dia (Seg-Sex: SEMANAL, Sab: SABADO, Dom: DOMINGO)
+            template_name = "SEMANAL.blm"
+            if weekday == 5: template_name = "SABADO.blm"
+            elif weekday == 6: template_name = "DOMINGO.blm"
+            
+            # Sobrescreve se houver algo específico no day_templates do config
+            template_name = config.day_templates.get(str(weekday), template_name)
 
             template_path = os.path.join(config.get_path('TEMPLATES'), template_name)
             output_path = os.path.join(config.get_path('OUTPUT'), f"{date_str}.bil")
 
             if not os.path.exists(template_path):
-                self.log(f"❌ Erro: Arquivo de modelo não encontrado: {template_path}")
+                self.log(f"❌ Erro: Modelo não encontrado: {template_path}")
                 return
 
-            self.log(f"📝 Processando: {template_name} -> {date_str}.bil")
-            
+            # 2. Escaneia blocos para agendamento de pagas
+            valid_blocks = []
+            with open(template_path, 'r', encoding='latin-1') as f:
+                for line in f:
+                    line = line.strip()
+                    if len(line) >= 5 and line[2] == ':' and line[0].isdigit():
+                        valid_blocks.append(line.split()[0])
+
+            # Agendamento de músicas pagas (Apenas dias de semana)
+            paid_reservations = {}
+            if weekday < 5:
+                self.log("📅 Agendando músicas pagas...")
+                for rule in config.paid_rules:
+                    # rule é um dict: {"filename": "...", "start": "HH:MM", "end": "HH:MM"}
+                    start_t = dt.datetime.strptime(rule['start'], "%H:%M").time()
+                    end_t = dt.datetime.strptime(rule['end'], "%H:%M").time()
+                    
+                    candidates = []
+                    for b in valid_blocks:
+                        b_t = dt.datetime.strptime(b, "%H:%M").time()
+                        if start_t <= b_t < end_t: candidates.append(b)
+                    
+                    if candidates:
+                        chosen = random.choice(candidates)
+                        if chosen not in paid_reservations: paid_reservations[chosen] = []
+                        paid_reservations[chosen].append(rule['filename'])
+
+            # 3. Processamento do Roteiro
+            self.log(f"📝 Gerando: {template_name} -> {date_str}.bil")
             with open(template_path, 'r', encoding='latin-1') as f_in:
                 lines = f_in.readlines()
 
-            output_lines = []
+            final_lines = ["# Arquivo de roteiro da beAudio\t1\t550470001"]
+            current_block_time = "00:00"
+            pending_paid = []
+
             for line in lines:
                 raw_line = line.strip()
-                if not raw_line or raw_line.startswith("#"):
-                    output_lines.append(raw_line)
-                    continue
-                
-                # Se for um marcador de tempo (ex: 00:00 /m:0...)
-                if ":" in raw_line[:5] and "/" in raw_line:
-                    output_lines.append(raw_line)
+                if not raw_line or raw_line.startswith("#"): continue
+
+                # CABEÇALHO DE BLOCO (00:00 ...)
+                if raw_line[0].isdigit() and ':' in raw_line and len(raw_line.split()[0]) == 5:
+                    current_block_time = raw_line.split()[0]
+                    final_lines.append(raw_line)
+                    pending_paid = paid_reservations.get(current_block_time, [])[:]
                     continue
 
-                # Se a linha contém um .apm (slot de categoria)
+                # COMERCIAIS
+                if 'Reserva' in raw_line or 'Início' in raw_line:
+                    final_lines.append("Início do bloco comercial /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:3 /n:1 /x: /g:0")
+                    final_lines.append("Término do bloco comercial /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:4 /n:1 /x: /g:0")
+                    continue
+
+                # FIXOS
+                if 'PREFIXO' in raw_line or raw_line.startswith('U:\\'):
+                    final_lines.append(raw_line)
+                    continue
+
+                # PROCESSAMENTO DE CATEGORIAS (.apm)
                 if ".apm" in raw_line.lower():
-                    # Separa o nome do slot dos parâmetros técnicos
-                    parts = raw_line.split(" ", 1)
-                    slot_name = parts[0]
-                    params = parts[1] if len(parts) > 1 else ""
+                    cat_part = raw_line.split(" ", 1)[0]
+                    cat = cat_part.upper().replace(".APM", "")
                     
-                    category = slot_name.upper().replace(".APM", "")
-                    
-                    # Tenta selecionar algo para esta categoria
-                    file_path, duration = self.select_music("", category, date_obj.hour)
+                    # Se tiver música paga pendente para este slot
+                    if pending_paid and not any(x in cat for x in ['VHT', 'CHAMADA', 'INTERCOM']):
+                        paid_file = pending_paid.pop(0)
+                        full_path = os.path.join(config.get_path('MUSIC_ROOT'), 'ESPECIAL', paid_file).replace('/', '\\')
+                        dur = self.get_audio_duration(full_path)
+                        final_lines.append(f"{full_path} /m:3000 /t:{dur} /i:0 /s:0 /f:{dur} /r:0 /d:0 /o:0 /n:1 /x:  /g:0")
+                        continue
+
+                    # Regra de Surpresa
+                    if cat == 'SERTANEJO B' and random.random() < 0.005:
+                        cat = 'SERTANEJO C'
+
+                    # Seleção inteligente (BPM + Histórico)
+                    file_path, duration = self.select_music("", cat, int(current_block_time[:2]))
                     
                     if file_path:
-                        # Substitui o .apm pelo caminho real, mantendo os parâmetros
-                        output_lines.append(f"{file_path} {params}")
+                        # Se for vinheta ou intercom, usamos parâmetros diferentes ou duração zero
+                        is_special = any(x in cat for x in ['VHT', 'CHAMADA', 'INTERCOM', 'AMOSTRA'])
+                        m_val = "0" if is_special else "3000"
+                        final_lines.append(f"{file_path} /m:{m_val} /t:{duration} /i:0 /s:0 /f:{duration} /r:0 /d:0 /o:0 /n:1 /x:  /g:0")
                     else:
-                        self.log(f"⚠️ Aviso: Nenhuma música encontrada para categoria {category}")
-                        output_lines.append(raw_line)
+                        final_lines.append(raw_line)
                 else:
-                    # É um caminho fixo ou algo que não deve ser mexido
-                    output_lines.append(raw_line)
+                    final_lines.append(raw_line)
 
-            # Grava o arquivo .bil final
-            with open(output_path, 'w', encoding='latin-1') as f_out:
-                f_out.write("\n".join(output_lines))
+            import unicodedata
+            with open(output_path, 'w', encoding='latin-1', errors='replace') as f_out:
+                normalized_content = unicodedata.normalize('NFC', "\n".join(final_lines))
+                f_out.write(normalized_content)
             
             self.log(f"✅ Roteiro gerado com sucesso: {output_path}")
 
         except Exception as e:
-            self.log(f"❌ Erro ao gerar roteiro: {str(e)}")
+            self.log(f"❌ Erro na geração: {str(e)}")
         finally:
             self.is_busy = False
 
