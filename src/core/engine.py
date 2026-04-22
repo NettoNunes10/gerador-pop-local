@@ -80,23 +80,20 @@ class PlaylistEngine:
             # 1. Limpeza total antes de começar
             self.global_cleanup()
             
-            # 2. Sincroniza apenas o que está dentro de MUSIC_ROOT
-            music_root = os.path.abspath(config.get_path('MUSIC_ROOT')).upper()
-            system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE']
+            # 2. Sincroniza pastas configuradas (exceto sistema)
+            system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE', 'MUSIC_ROOT']
             
             for category, folder in config.paths.items():
-                folder_abs = os.path.abspath(folder).upper()
+                cat_upper = category.upper()
                 
-                # Só sincroniza se estiver dentro de MUSIC_ROOT e NÃO for pasta de sistema
-                if folder_abs.startswith(music_root) and category.upper() not in system_folders:
-                    if os.path.exists(folder):
-                        # Pula análise pesada apenas para o que for explicitamente vinheta/comercial/sweep
-                        is_plastic = any(x in category.upper() for x in ['VINHETAS', 'COMERCIAIS', 'PREFIXO', 'ENCERRAMENTO', 'VHT', 'PROMO'])
-                        self.sync_folder_to_db(folder, category, analyze=not is_plastic)
-                else:
-                    # Opcional: Log de depuração se necessário
-                    # self.log(f"ℹ️ Pulando pasta fora do root: {category}")
-                    pass
+                # Pula se for pasta de sistema ou o próprio ROOT (que é só uma referência)
+                if cat_upper in system_folders:
+                    continue
+                
+                if os.path.exists(folder):
+                    # Pula análise pesada apenas para o que for explicitamente vinheta/comercial/sweep
+                    is_plastic = any(x in cat_upper for x in ['VINHETAS', 'COMERCIAIS', 'PREFIXO', 'ENCERRAMENTO', 'VHT', 'PROMO', 'SWEEP', 'INTERCOM'])
+                    self.sync_folder_to_db(folder, category, analyze=not is_plastic)
             
             self.log("✅ Sincronização concluída com sucesso!")
         except Exception as e:
