@@ -80,16 +80,23 @@ class PlaylistEngine:
             # 1. Limpeza total antes de começar
             self.global_cleanup()
             
-            # 2. Sincroniza apenas pastas de MÚSICA (ignora pastas de sistema)
+            # 2. Sincroniza apenas o que está dentro de MUSIC_ROOT
+            music_root = os.path.abspath(config.get_path('MUSIC_ROOT')).upper()
             system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE']
+            
             for category, folder in config.paths.items():
-                if category.upper() in system_folders:
-                    continue
+                folder_abs = os.path.abspath(folder).upper()
                 
-                if os.path.exists(folder):
-                    # Se for pasta de música, analisa tudo. Se for vinheta/comercial, apenas registra o caminho.
-                    is_music = category.upper() not in ['VINHETAS', 'COMERCIAIS', 'PREFIXO', 'ENCERRAMENTO']
-                    self.sync_folder_to_db(folder, category, analyze=is_music)
+                # Só sincroniza se estiver dentro de MUSIC_ROOT e NÃO for pasta de sistema
+                if folder_abs.startswith(music_root) and category.upper() not in system_folders:
+                    if os.path.exists(folder):
+                        # Pula análise pesada apenas para o que for explicitamente vinheta/comercial/sweep
+                        is_plastic = any(x in category.upper() for x in ['VINHETAS', 'COMERCIAIS', 'PREFIXO', 'ENCERRAMENTO', 'VHT', 'PROMO'])
+                        self.sync_folder_to_db(folder, category, analyze=not is_plastic)
+                else:
+                    # Opcional: Log de depuração se necessário
+                    # self.log(f"ℹ️ Pulando pasta fora do root: {category}")
+                    pass
             
             self.log("✅ Sincronização concluída com sucesso!")
         except Exception as e:
