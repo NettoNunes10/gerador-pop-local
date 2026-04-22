@@ -40,29 +40,60 @@ class SpotifyService:
             print(f"[SPOTIFY] Erro ao obter token: {e}")
         return None
 
+    def _clean_query(self, text):
+        """Limpa o termo de busca para aumentar as chances de acerto no Spotify."""
+        import re
+        # Remove (Ao Vivo), (Live), [Remix], etc.
+        text = re.sub(r'[\(\[][^\]\)]*[\)\]]', '', text)
+        # Remove PART, FT, FEAT
+        text = re.sub(r'\b(PART|FT|FEAT|PARTICIPAÇÃO)\b.*', '', text, flags=re.IGNORECASE)
+        return text.strip()
+
     def search_track(self, artist, title):
         """Busca o ID de uma música no Spotify."""
         token = self._get_token()
-        if not token: return None
+        if not token: 
+            print("[SPOTIFY] ❌ Erro: Token não disponível. Verifique Client ID/Secret.")
+            return None
 
-        query = f"track:{title} artist:{artist}"
+        clean_title = self._clean_query(title)
+        clean_artist = self._clean_query(artist)
+        
+        # Tenta busca específica
+        query = f"track:{clean_title} artist:{clean_artist}"
         url = "https://api.spotify.com/v1/search"
         headers = {"Authorization": f"Bearer {token}"}
         params = {"q": query, "type": "track", "limit": 1}
 
         try:
+            print(f"[SPOTIFY] 🔎 Buscando: {clean_artist} - {clean_title}...")
             response = requests.get(url, headers=headers, params=params)
+            
             if response.status_code == 200:
                 results = response.json().get('tracks', {}).get('items', [])
                 if results:
-                    return results[0]['id']
+                    sp_id = results[0]['id']
+                    print(f"[SPOTIFY] ✅ Encontrado! ID: {sp_id}")
+                    return sp_id
+                else:
+                    # Tenta busca genérica se a específica falhar
+                    print(f"[SPOTIFY] ⚠️ Sem resultados específicos. Tentando busca aberta...")
+                    params["q"] = f"{clean_artist} {clean_title}"
+                    response = requests.get(url, headers=headers, params=params)
+                    results = response.json().get('tracks', {}).get('items', [])
+                    if results:
+                        sp_id = results[0]['id']
+                        print(f"[SPOTIFY] ✅ Encontrado (Busca Aberta)! ID: {sp_id}")
+                        return sp_id
             elif response.status_code == 429:
                 retry_after = int(response.headers.get('Retry-After', 5))
-                print(f"[SPOTIFY] Rate limit atingido. Aguardando {retry_after}s...")
+                print(f"[SPOTIFY] ⏳ Rate limit. Aguardando {retry_after}s...")
                 time.sleep(retry_after)
                 return self.search_track(artist, title)
+            
+            print(f"[SPOTIFY] ❌ Música não encontrada no catálogo.")
         except Exception as e:
-            print(f"[SPOTIFY] Erro na busca: {e}")
+            print(f"[SPOTIFY] ❌ Erro na busca: {e}")
         return None
 
     def get_audio_features(self, spotify_id):
