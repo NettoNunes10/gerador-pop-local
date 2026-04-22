@@ -1,11 +1,13 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import os
 import datetime
 import logging
 import urllib.parse
+import shutil
+from typing import Optional
 from .core.config import config
 from .core.engine import PlaylistEngine
 from .core.database import db
@@ -87,10 +89,6 @@ def get_stats():
         return {"categories": [], "top_artists": []}
     return db.get_stats()
 
-import shutil
-
-from fastapi.responses import StreamingResponse
-from typing import Optional
 
 @app.get("/library")
 def get_library(
@@ -307,5 +305,5 @@ threading.Thread(target=watchdog, daemon=True).start()
 
 if __name__ == "__main__":
     import uvicorn
-    # Rodando com workers=1 mas loop asyncio otimizado
-    uvicorn.run("src.api:app", host="127.0.0.1", port=8000, reload=False, workers=1, timeout_keep_alive=30)
+    # Passando o objeto app diretamente para evitar erros de importação
+    uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
