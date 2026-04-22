@@ -151,21 +151,32 @@ def get_library(
 
     items = []
     for r in rows:
+        audio_url = None
         try:
             full_path = r[8]
-            # Gera o caminho relativo para o servidor de áudio ( Porta 8001 )
-            rel_path = os.path.relpath(full_path, music_root).replace('\\', '/')
-            encoded_rel = urllib.parse.quote(rel_path, safe='/')
-            audio_url = f"{AUDIO_SERVER_URL}/{encoded_rel}"
+            # Normalização para evitar problemas de M:/ vs m:/
+            m_root = music_root.lower().replace('\\', '/')
+            f_path = full_path.lower().replace('\\', '/')
             
-            items.append({
-                "id": r[0], "nome": r[1], "artista": r[2],
-                "categoria": r[3], "bpm": r[4], "peso": r[5],
-                "sub_categoria": r[6], "data_arquivo": r[7],
-                "audio_url": audio_url
-            })
-        except:
-            continue
+            if f_path.startswith(m_root):
+                rel_path = full_path[len(music_root):].lstrip('\\/')
+                encoded_rel = urllib.parse.quote(rel_path.replace('\\', '/'), safe='/')
+                audio_url = f"{AUDIO_SERVER_URL}/{encoded_rel}"
+            else:
+                # Se não começar com o root, tenta pegar o que vem depois da letra do drive
+                if ":/" in f_path or ":\\" in f_path:
+                    rel_path = f_path.split(":", 1)[1].lstrip('\\/')
+                    encoded_rel = urllib.parse.quote(rel_path, safe='/')
+                    audio_url = f"{AUDIO_SERVER_URL}/{encoded_rel}"
+        except Exception as e:
+            print(f"⚠️ Erro ao gerar URL para {r[1]}: {e}")
+
+        items.append({
+            "id": r[0], "nome": r[1], "artista": r[2],
+            "categoria": r[3], "bpm": r[4], "peso": r[5],
+            "sub_categoria": r[6], "data_arquivo": r[7],
+            "audio_url": audio_url
+        })
 
     return {
         "items": items,
