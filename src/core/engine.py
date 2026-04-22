@@ -174,37 +174,50 @@ class PlaylistEngine:
                 self.log(f"❌ Erro: Arquivo de modelo não encontrado: {template_path}")
                 return
 
-            self.log(f"📝 Gerando roteiro: {template_name} -> {date_str}.bil")
+            self.log(f"📝 Processando: {template_name} -> {date_str}.bil")
             
             with open(template_path, 'r', encoding='latin-1') as f_in:
                 lines = f_in.readlines()
 
             output_lines = []
             for line in lines:
-                line = line.strip()
-                if not line:
-                    output_lines.append("")
+                raw_line = line.strip()
+                if not raw_line or raw_line.startswith("#"):
+                    output_lines.append(raw_line)
                     continue
                 
-                # O formato do .blm costuma ter comandos entre colchetes ou nomes de categorias
-                # Vamos identificar se a linha é um comando de seleção
-                category = line.upper().replace("[", "").replace("]", "")
-                
-                # Tenta selecionar algo para esta categoria
-                # Passamos a hora atual se o template tiver essa info (ou usamos 0 como padrão)
-                file_path, duration = self.select_music("", category, date_obj.hour)
-                
-                if file_path:
-                    output_lines.append(file_path)
+                # Se for um marcador de tempo (ex: 00:00 /m:0...)
+                if ":" in raw_line[:5] and "/" in raw_line:
+                    output_lines.append(raw_line)
+                    continue
+
+                # Se a linha contém um .apm (slot de categoria)
+                if ".apm" in raw_line.lower():
+                    # Separa o nome do slot dos parâmetros técnicos
+                    parts = raw_line.split(" ", 1)
+                    slot_name = parts[0]
+                    params = parts[1] if len(parts) > 1 else ""
+                    
+                    category = slot_name.upper().replace(".APM", "")
+                    
+                    # Tenta selecionar algo para esta categoria
+                    file_path, duration = self.select_music("", category, date_obj.hour)
+                    
+                    if file_path:
+                        # Substitui o .apm pelo caminho real, mantendo os parâmetros
+                        output_lines.append(f"{file_path} {params}")
+                    else:
+                        self.log(f"⚠️ Aviso: Nenhuma música encontrada para categoria {category}")
+                        output_lines.append(raw_line)
                 else:
-                    # Se não achar nada, mantém a linha original (pode ser um comando fixo ou comentário)
-                    output_lines.append(line)
+                    # É um caminho fixo ou algo que não deve ser mexido
+                    output_lines.append(raw_line)
 
             # Grava o arquivo .bil final
             with open(output_path, 'w', encoding='latin-1') as f_out:
                 f_out.write("\n".join(output_lines))
             
-            self.log(f"✅ Roteiro gerado com sucesso em: {output_path}")
+            self.log(f"✅ Roteiro gerado com sucesso: {output_path}")
 
         except Exception as e:
             self.log(f"❌ Erro ao gerar roteiro: {str(e)}")
