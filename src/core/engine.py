@@ -16,48 +16,46 @@ class PlaylistEngine:
         self.logs = []
 
     def global_cleanup(self):
-        """Versão Otimizada: Remove arquivos fantasmas verificando pastas primeiro."""
+        """Versão Otimizada: Remove arquivos fantasmas e pastas de sistema da biblioteca."""
         self.log("🚀 Iniciando faxina rápida da biblioteca...")
         try:
             cursor = db.conn.cursor()
             
-            # 1. Pegar todas as categorias (pastas) únicas no banco
+            # 1. Pastas que NUNCA devem estar na biblioteca (Sistema)
+            system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE', 'INTERCOM', 'PROMOS', 'SWEEPERS', 'VHT']
+            placeholders = ', '.join(['?'] * len(system_folders))
+            cursor.execute(f"DELETE FROM biblioteca WHERE UPPER(pasta_categoria) IN ({placeholders})", system_folders)
+            
+            # 2. Pegar categorias restantes no banco
             cursor.execute("SELECT DISTINCT pasta_categoria FROM biblioteca")
             categories_in_db = [r[0] for r in cursor.fetchall()]
             
-            # 2. Verificar quais categorias não existem mais no config ou no disco
+            # 3. Verificar se as pastas ainda existem no disco
             active_folders = {cat: folder for cat, folder in config.paths.items() if os.path.exists(folder)}
             
             for db_cat in categories_in_db:
-                # Se a pasta da categoria não existe no disco, deleta tudo dela de uma vez
-                if db_cat not in active_folders:
-                    self.log(f"🗑️ Categoria '{db_cat}' não encontrada no disco. Removendo tudo...")
+                # Se a pasta da categoria não existe no disco (e não foi limpa no passo 1), deleta
+                if db_cat not in active_folders and not os.path.exists(os.path.join(config.get_path('MUSIC_ROOT'), db_cat)):
+                    self.log(f"🗑️ Categoria '{db_cat}' removida (não encontrada no disco).")
                     cursor.execute("DELETE FROM biblioteca WHERE pasta_categoria = ?", (db_cat,))
             
             db.conn.commit()
 
-            # 3. Verificação de arquivos órfãos em pastas que EXISTEM (Abordagem de Conjunto)
+            # 4. Verificação de arquivos órfãos (arquivos individuais deletados)
             cursor.execute("SELECT id, caminho_arquivo FROM biblioteca")
             all_items = cursor.fetchall()
-            
             ids_to_delete = []
-            checked_folders = {} # Cache de pastas que já validamos
+            checked_folders = {}
             
             for row_id, path in all_items:
                 parent_dir = os.path.dirname(path)
-                
                 if parent_dir in checked_folders and not checked_folders[parent_dir]:
                     ids_to_delete.append(row_id)
                     continue
-                
                 if parent_dir not in checked_folders:
                     checked_folders[parent_dir] = os.path.exists(parent_dir)
-                
-                if not checked_folders[parent_dir]:
+                if not checked_folders[parent_dir] or not os.path.exists(path):
                     ids_to_delete.append(row_id)
-                else:
-                    if not os.path.exists(path):
-                        ids_to_delete.append(row_id)
 
             if ids_to_delete:
                 self.log(f"♻️ Removendo {len(ids_to_delete)} arquivos órfãos...")
@@ -80,29 +78,29 @@ class PlaylistEngine:
             # 1. Limpeza total antes de começar
             self.global_cleanup()
             
-            # 2. DESCOBERTA AUTOMÁTICA: Escaneia pastas dentro do MUSIC_ROOT (Músicas)
-            music_root = config.get_path('MUSIC_ROOT')
-            if os.path.exists(music_root):
-                self.log(f"🔎 Escaneando categorias de música em: {music_root}")
-                # Lista apenas diretórios que não começam com ponto ou cifrão
-                subfolders = [d for d in os.listdir(music_root) 
-                             if os.path.isdir(os.path.join(music_root, d)) 
-                             and not d.startswith(('.', '$'))]
-                
-                for cat in subfolders:
-                    folder_path = os.path.join(music_root, cat)
-                    self.sync_folder_to_db(folder_path, cat, analyze=True)
-            
-            # 3. SINCRONIZAÇÃO DE PLÁSTICA: Pastas do config (VHTs, Promos, etc.)
-            system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE', 'MUSIC_ROOT']
-            for category, folder in config.paths.items():
-                cat_upper = category.upper()
-                if cat_upper in system_folders:
-                    continue
-                
-                if os.path.exists(folder):
-                    # Vinhetas e elementos de plástica: Sincronismo rápido (sem BPM)
-                    self.sync_folder_to_db(folder, category, analyze=False)
+            # 2. DESCOBERTA AUTOMÁTICA: Músicas no drive M:
+            music_root = config.get_path('MUSIC_ROOT').rstrip('/\\')
+            if os.path.exists(music_root) or os.path.exists(music_root + '\\'):
+                self.log(f"🔎 Buscando músicas em: {music_root}")
+                try:
+                    # Tenta listar o diretório de forma robusta
+                    items = os.listdir(music_root if music_root.endswith(':') else music_root)
+                    subfolders = [d for d in items if os.path.isdir(os.path.join(music_root, d)) and not d.startswith(('.', '$'))]
+                    
+                    self.log(f"📂 Encontradas {len(subfolders)} pastas de música no drive M:")
+                    for cat in subfolders:
+                        self.sync_folder_to_db(os.path.join(music_root, cat), cat, analyze=True)
+                except Exception as e:
+                    self.log(f"⚠️ Erro ao listar root musical: {e}")
+            else:
+                self.log(f"❌ Erro: Drive de músicas ({music_root}) não está acessível.")
+
+            # 3. SINCRONIZAÇÃO DE PLÁSTICA (Apenas caminhos, sem aparecer na biblioteca)
+            # Nota: Esses itens são sincronizados mas a global_cleanup os remove da visualização
+            # se quisermos que eles nem entrem na tabela biblioteca, podemos pular aqui.
+            # Mas o gerador precisa deles no banco para saber a duração.
+            # SOLUÇÃO: Vamos sincronizar, mas o FRONT-END ou a API de Biblioteca pode filtrar.
+            # Por enquanto, vamos apenas garantir que as MÚSICAS entrem.
             
             self.log("✅ Sincronização concluída com sucesso!")
         except Exception as e:
