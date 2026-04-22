@@ -158,10 +158,56 @@ class PlaylistEngine:
     def generate_schedule(self, date_str):
         self.is_busy = True
         try:
-            # Lógica de geração de roteiro (simplificada para o exemplo)
-            self.log(f"Gerando roteiro para {date_str}...")
-            # Aqui entraria a chamada para carregar o template .blm e preencher
-            # Por enquanto, mantemos a estrutura de logs
+            # 1. Identifica o modelo (.blm) pelo dia da semana
+            date_obj = dt.datetime.strptime(date_str, "%Y%m%d")
+            weekday = str(date_obj.weekday())
+            template_name = config.day_templates.get(weekday)
+            
+            if not template_name:
+                self.log(f"❌ Erro: Nenhum modelo configurado para o dia da semana {weekday}")
+                return
+
+            template_path = os.path.join(config.get_path('TEMPLATES'), template_name)
+            output_path = os.path.join(config.get_path('OUTPUT'), f"{date_str}.bil")
+
+            if not os.path.exists(template_path):
+                self.log(f"❌ Erro: Arquivo de modelo não encontrado: {template_path}")
+                return
+
+            self.log(f"📝 Gerando roteiro: {template_name} -> {date_str}.bil")
+            
+            with open(template_path, 'r', encoding='latin-1') as f_in:
+                lines = f_in.readlines()
+
+            output_lines = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    output_lines.append("")
+                    continue
+                
+                # O formato do .blm costuma ter comandos entre colchetes ou nomes de categorias
+                # Vamos identificar se a linha é um comando de seleção
+                category = line.upper().replace("[", "").replace("]", "")
+                
+                # Tenta selecionar algo para esta categoria
+                # Passamos a hora atual se o template tiver essa info (ou usamos 0 como padrão)
+                file_path, duration = self.select_music("", category, date_obj.hour)
+                
+                if file_path:
+                    output_lines.append(file_path)
+                else:
+                    # Se não achar nada, mantém a linha original (pode ser um comando fixo ou comentário)
+                    output_lines.append(line)
+
+            # Grava o arquivo .bil final
+            with open(output_path, 'w', encoding='latin-1') as f_out:
+                f_out.write("\n".join(output_lines))
+            
+            self.log(f"✅ Roteiro gerado com sucesso em: {output_path}")
+
+        except Exception as e:
+            self.log(f"❌ Erro ao gerar roteiro: {str(e)}")
         finally:
             self.is_busy = False
 
