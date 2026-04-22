@@ -39,7 +39,7 @@ function App() {
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
-  const [energyLevel, setEnergyLevel] = useState('')
+  const [bpm, setBpm] = useState('')
   const [sortBy, setSortBy] = useState('artista')
   
   // Player State
@@ -117,7 +117,7 @@ function App() {
   // Filtros imediatos (dropdowns)
   useEffect(() => {
     fetchLibrary({ page: 1 })
-  }, [filterCategory, filterGroup, energyLevel, sortBy])
+  }, [filterCategory, filterGroup, bpm, sortBy])
 
   useEffect(() => {
     const el = logContainerRef.current
@@ -163,7 +163,7 @@ function App() {
       if (opts.search  ?? searchTerm)  params.set('search',   opts.search  ?? searchTerm)
       if (opts.category ?? filterCategory) params.set('category', opts.category ?? filterCategory)
       if (opts.group    ?? filterGroup)    params.set('group',    opts.group    ?? filterGroup)
-      if (opts.energy_level ?? energyLevel) params.set('energy_level', opts.energy_level ?? energyLevel)
+      if (opts.bpm      ?? bpm)            params.set('bpm',      opts.bpm      ?? bpm)
       if (opts.sort     ?? sortBy)         params.set('sort',     opts.sort     ?? sortBy)
       const res = await safeFetch(`${API_URL}/library?${params}`)
       const data = await res.json()
@@ -555,8 +555,7 @@ function App() {
               <th style={{textAlign: 'left', padding: '1rem'}}>MÚSICA</th>
               <th style={{width: '110px', textAlign: 'left', padding: '1rem'}}>PASTA</th>
               <th style={{width: '105px', textAlign: 'left', padding: '1rem'}}>GRUPO</th>
-              <th style={{width: '100px', textAlign: 'left', padding: '1rem'}}>ENERGIA</th>
-              <th style={{width: '70px', textAlign: 'left', padding: '1rem'}}>VIBE</th>
+              <th style={{width: '70px', textAlign: 'left', padding: '1rem'}}>BPM</th>
               <th style={{width: '75px', textAlign: 'left', padding: '1rem'}}>PESO</th>
             </tr>
           </thead>
@@ -581,18 +580,12 @@ function App() {
                     {rotationGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
                   </select>
                 </td>
-                <td>
-                  <div style={{width: '100%', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '10px', overflow: 'hidden'}} title={`Energia: ${Math.round(track.energy * 100)}%`}>
-                    <div style={{width: `${track.energy * 100}%`, height: '100%', background: `linear-gradient(90deg, #00f2ff, #bc13fe)`}}></div>
-                  </div>
-                </td>
-                <td style={{textAlign: 'center', fontSize: '0.8rem'}}>
-                   <span style={{
-                     color: track.valence > 0.6 ? '#00ffaa' : track.valence < 0.4 ? '#ff2d55' : '#ffaa00',
-                     fontWeight: 800
-                   }}>
-                     {track.valence > 0.6 ? '😊' : track.valence < 0.4 ? '😔' : '😐'}
-                   </span>
+                <td style={{
+                  color: track.bpm > 120 ? '#ff2d55' : track.bpm < 80 ? '#00f2ff' : '#00ffaa',
+                  fontWeight: 800,
+                  fontSize: '0.85rem'
+                }}>
+                  {Math.round(track.bpm) || '--'}
                 </td>
                 <td>
                   <input 

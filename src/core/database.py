@@ -9,20 +9,16 @@ DB_PATH = "base_dados_radio.db"
 class DatabaseManager:
     def __init__(self):
         self._local = threading.local()
-        # Cria as tabelas usando uma conexão inicial temporária
         conn = self._get_conn()
         self._create_tables(conn)
 
     def _get_conn(self):
-        """Retorna a conexão SQLite da thread atual (cria se não existir)."""
         if not hasattr(self._local, 'conn') or self._local.conn is None:
             try:
                 conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")   
                 conn.execute("PRAGMA synchronous=OFF")
-                conn.execute("PRAGMA busy_timeout=10000")
-                conn.execute("PRAGMA journal_size_limit=10000000")
                 self._local.conn = conn
             except Exception as e:
                 print(f"CRITICAL DB ERROR: {e}")
@@ -37,8 +33,6 @@ class DatabaseManager:
 
     def _create_tables(self, conn):
         cursor = conn.cursor()
-        
-        # Tabela biblioteca
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS biblioteca (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +41,7 @@ class DatabaseManager:
                 artista TEXT,
                 pasta_categoria TEXT,
                 sub_categoria TEXT,
-                bpm REAL,
+                bpm REAL DEFAULT 0,
                 peso_especifico REAL DEFAULT 1.0,
                 data_arquivo TEXT,
                 duracao INTEGER DEFAULT 0,
@@ -57,54 +51,17 @@ class DatabaseManager:
                 spotify_id TEXT
             )
         ''')
-        # Migrações para colunas faltantes
-        migrations = [
-            "ALTER TABLE biblioteca ADD COLUMN sub_categoria TEXT",
-            "ALTER TABLE biblioteca ADD COLUMN data_arquivo TEXT",
-            "ALTER TABLE biblioteca ADD COLUMN duracao INTEGER DEFAULT 0",
-            "ALTER TABLE biblioteca ADD COLUMN energy REAL DEFAULT 0.5",
-            "ALTER TABLE biblioteca ADD COLUMN valence REAL DEFAULT 0.5",
-            "ALTER TABLE biblioteca ADD COLUMN danceability REAL DEFAULT 0.5",
-            "ALTER TABLE biblioteca ADD COLUMN spotify_id TEXT"
-        ]
-        for col_def in migrations:
-            try:
-                cursor.execute(col_def)
+        # Migrações silenciosas
+        cols = ["sub_categoria TEXT", "data_arquivo TEXT", "duracao INTEGER DEFAULT 0", "energy REAL DEFAULT 0.5", "valence REAL DEFAULT 0.5", "danceability REAL DEFAULT 0.5", "spotify_id TEXT"]
+        for c in cols:
+            try: cursor.execute(f"ALTER TABLE biblioteca ADD COLUMN {c}")
             except: pass
 
-        # Tabela artistas_favoritos
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS artistas_favoritos (
-                nome_artista TEXT PRIMARY KEY,
-                multiplicador REAL DEFAULT 1.5
-            )
-        ''')
-
-        # Tabela historico_execucao
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS historico_execucao (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                caminho_arquivo TEXT,
-                data_hora TIMESTAMP,
-                dia_semana INTEGER
-            )
-        ''')
-
-        # Semente inicial de artistas favoritos
-        cursor.execute("SELECT COUNT(*) FROM artistas_favoritos")
-        if cursor.fetchone()[0] == 0:
-            for artist in config.favorite_artists:
-                cursor.execute("INSERT OR IGNORE INTO artistas_favoritos (nome_artista, multiplicador) VALUES (?, ?)", (artist, 1.5))
-        
+        cursor.execute('CREATE TABLE IF NOT EXISTS artistas_favoritos (nome_artista TEXT PRIMARY KEY, multiplicador REAL DEFAULT 1.5)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS historico_execucao (id INTEGER PRIMARY KEY AUTOINCREMENT, caminho_arquivo TEXT, data_hora TIMESTAMP, dia_semana INTEGER)')
         conn.commit()
-        
-        try:
-            conn.execute("PRAGMA optimize")
-            conn.execute("VACUUM")
-        except: pass
 
     def insert_music(self, nome_musica, artista, caminho_arquivo, pasta_categoria, bpm, duracao, energy=0.5, valence=0.5, danceability=0.5, spotify_id=None, sub_categoria='STD', data_arquivo=None):
-        """Método unificado para inserção de músicas e vinhetas com suporte a Spotify."""
         try:
             self.conn.execute('''
                 INSERT INTO biblioteca (
@@ -118,10 +75,6 @@ class DatabaseManager:
                     pasta_categoria=excluded.pasta_categoria,
                     bpm=excluded.bpm,
                     duracao=excluded.duracao,
-                    energy=excluded.energy,
-                    valence=excluded.valence,
-                    danceability=excluded.danceability,
-                    spotify_id=excluded.spotify_id,
                     sub_categoria=excluded.sub_categoria,
                     data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
             ''', (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, duracao, 
@@ -130,27 +83,20 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao inserir música: {e}")
 
-    def add_to_library(self, filepath, artists, title, category, bpm, subcat='STD', data_arquivo=None, duracao=0):
-        """Mantém compatibilidade com chamadas antigas."""
-        self.insert_music(title, artists, filepath, category, bpm, duracao, sub_categoria=subcat, data_arquivo=data_arquivo)
-
     def log_execution(self, filepath):
         now = datetime.datetime.now()
-        self.conn.execute('''
-            INSERT INTO historico_execucao (caminho_arquivo, data_hora, dia_semana)
-            VALUES (?, ?, ?)
-        ''', (filepath, now, now.weekday()))
-        self.conn.commit()
-
-    def update_subcategory(self, track_id, subcat):
-        self.conn.execute("UPDATE biblioteca SET sub_categoria = ? WHERE id = ?", (subcat, track_id))
+        self.conn.execute('INSERT INTO historico_execucao (caminho_arquivo, data_hora, dia_semana) VALUES (?, ?, ?)', (filepath, now, now.weekday()))
         self.conn.commit()
 
     def update_weight(self, track_id, weight):
         self.conn.execute("UPDATE biblioteca SET peso_especifico = ? WHERE id = ?", (weight, track_id))
         self.conn.commit()
 
-    def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_energy=0.5, min_rest_hours=4):
+    def update_subcategory(self, track_id, subcat):
+        self.conn.execute("UPDATE biblioteca SET sub_categoria = ? WHERE id = ?", (subcat, track_id))
+        self.conn.commit()
+
+    def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_bpm=0, min_rest_hours=4):
         cursor = self.conn.cursor()
         query = '''
             SELECT b.*, f.multiplicador,
@@ -175,39 +121,24 @@ class DatabaseManager:
             filepath = cand['caminho_arquivo']
             if not os.path.exists(filepath): continue
             
-            # FILTRO DE ENERGIA: Evita saltos bruscos (delta de 0.35)
-            energy_val = cand['energy'] if cand['energy'] is not None else 0.5
-            energy_diff = abs(energy_val - last_energy)
-            if energy_diff > 0.35: 
+            # FILTRO DE RITMO (BPM): Evita quebrar a cadência
+            # Se a última foi lenta (<80), evita outra lenta para manter a rádio viva
+            current_bpm = cand['bpm'] or 0
+            if last_bpm > 0 and last_bpm < 80 and current_bpm > 0 and current_bpm < 80:
                 continue
 
             ultima_vez_str = cand['ultima_vez']
             if ultima_vez_str:
                 ultima_vez = datetime.datetime.fromisoformat(ultima_vez_str)
                 delta = now - ultima_vez
-                minutes_since = delta.total_seconds() / 60
                 if delta.total_seconds() < min_rest_hours * 3600: continue
+                minutes_since = delta.total_seconds() / 60
             else:
                 minutes_since = 14400 
 
-            dayparting_factor = 1.0
-            cursor.execute('''
-                SELECT COUNT(*) FROM historico_execucao
-                WHERE caminho_arquivo = ? 
-                AND data_hora >= ? AND data_hora <= ?
-            ''', (filepath, 
-                  (now - datetime.timedelta(days=1, hours=1)).isoformat(),
-                  (now - datetime.timedelta(days=1, hours=-1)).isoformat()))
-            if cursor.fetchone()[0] > 0: dayparting_factor = 0.5
-
             weight = cand['peso_especifico'] or 1.0
             mult = cand['multiplicador'] or 1.0
-            
-            # Score Final agora considera a Positividade (Valence)
-            valence_val = cand['valence'] if cand['valence'] is not None else 0.5
-            valence_bonus = 1.0 + (valence_val * 0.2)
-            
-            score = minutes_since * weight * mult * dayparting_factor * valence_bonus
+            score = minutes_since * weight * mult
             
             if score > best_score:
                 best_score = score

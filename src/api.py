@@ -97,7 +97,7 @@ def get_library(
     search: Optional[str] = None,
     category: Optional[str] = None,
     group: Optional[str] = None,
-    energy_level: Optional[str] = None,
+    bpm: Optional[str] = None,
     sort: str = "artista"
 ):
     conditions = []
@@ -113,21 +113,21 @@ def get_library(
         conditions.append("sub_categoria = ?")
         params.append(group)
     
-    # Filtros de Energia em vez de BPM
-    if energy_level == "L":
-        conditions.append("energy < 0.4")
-    elif energy_level == "M":
-        conditions.append("energy >= 0.4 AND energy <= 0.7")
-    elif energy_level == "H":
-        conditions.append("energy > 0.7")
+    # Filtros de BPM restaurados
+    if bpm == "L":
+        conditions.append("bpm < 80")
+    elif bpm == "M":
+        conditions.append("bpm >= 80 AND bpm <= 120")
+    elif bpm == "H":
+        conditions.append("bpm > 120")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     sort_map = {
         "artista": "artista ASC",
         "nome": "nome_musica ASC",
         "data_desc": "data_arquivo DESC NULLS LAST",
-        "energy_desc": "energy DESC",
-        "energy_asc": "energy ASC",
+        "bpm_desc": "bpm DESC",
+        "bpm_asc": "bpm ASC",
     }
     order = sort_map.get(sort, "artista ASC")
 
@@ -137,8 +137,7 @@ def get_library(
     
     query = f"""
         SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, 
-               sub_categoria, data_arquivo, energy, valence, danceability 
-        FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?
+               sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?
     """
     rows = db.conn.execute(query, params + [limit, offset]).fetchall()
 
@@ -147,8 +146,7 @@ def get_library(
             {
                 "id": r[0], "nome": r[1], "artista": r[2],
                 "categoria": r[3], "bpm": r[4], "peso": r[5],
-                "sub_categoria": r[6], "data_arquivo": r[7],
-                "energy": r[8], "valence": r[9], "danceability": r[10]
+                "sub_categoria": r[6], "data_arquivo": r[7]
             } for r in rows
         ],
         "total": total,

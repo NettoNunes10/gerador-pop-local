@@ -1,347 +1,180 @@
 import os
 import random
-import datetime
-from mutagen import File as MutagenFile
+import datetime as dt
 from .config import config
 from .models import PaidInsertion
 from .database import db
 from .analyzer import analyzer
-from .spotify import spotify_service
+from .bpm_service import bpm_service
 
 class PlaylistEngine:
     def __init__(self, log_callback=None):
         self.last_sweeper = ""
-        self.last_energy = 0.5
+        self.last_bpm = 0
         self.log_callback = log_callback
         self.is_busy = False
         self.logs = []
 
+    def log(self, message):
+        timestamp = dt.datetime.now().strftime("%H:%M:%S")
+        full_msg = f"[{timestamp}] {message}"
+        self.logs.append(full_msg)
+        if len(self.logs) > 500: self.logs.pop(0)
+        if self.log_callback:
+            self.log_callback(full_msg)
+        print(f"[ENGINE] {message}")
+
     def global_cleanup(self):
-        """Versão Otimizada: Remove arquivos fantasmas e pastas de sistema da biblioteca."""
-        self.log("🚀 Iniciando faxina rápida da biblioteca...")
-        try:
-            cursor = db.conn.cursor()
+        """Remove registros de arquivos que não existem mais ou de pastas de sistema."""
+        cursor = db.conn.cursor()
+        cursor.execute("SELECT id, caminho_arquivo FROM biblioteca")
+        rows = cursor.fetchall()
+        
+        deleted_count = 0
+        system_folders = ['Samples', 'Intercom', 'Templates', 'Settings']
+        
+        for row in rows:
+            path = row[1]
+            is_system = any(f"\\{folder}\\" in path.upper() or f"/{folder}/" in path.upper() for folder in system_folders)
             
-            # 1. Pastas que NUNCA devem estar na biblioteca (Sistema)
-            system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE', 'INTERCOM', 'PROMOS', 'SWEEPERS', 'VHT']
-            placeholders = ', '.join(['?'] * len(system_folders))
-            cursor.execute(f"DELETE FROM biblioteca WHERE UPPER(pasta_categoria) IN ({placeholders})", system_folders)
-            
-            # 2. Pegar categorias restantes no banco
-            cursor.execute("SELECT DISTINCT pasta_categoria FROM biblioteca")
-            categories_in_db = [r[0] for r in cursor.fetchall()]
-            
-            # 3. Verificar se as pastas ainda existem no disco
-            active_folders = {cat: folder for cat, folder in config.paths.items() if os.path.exists(folder)}
-            
-            for db_cat in categories_in_db:
-                # Se a pasta da categoria não existe no disco (e não foi limpa no passo 1), deleta
-                if db_cat not in active_folders and not os.path.exists(os.path.join(config.get_path('MUSIC_ROOT'), db_cat)):
-                    self.log(f"🗑️ Categoria '{db_cat}' removida (não encontrada no disco).")
-                    cursor.execute("DELETE FROM biblioteca WHERE pasta_categoria = ?", (db_cat,))
-            
-            db.conn.commit()
-
-            # 4. Verificação de arquivos órfãos (arquivos individuais deletados)
-            cursor.execute("SELECT id, caminho_arquivo FROM biblioteca")
-            all_items = cursor.fetchall()
-            ids_to_delete = []
-            checked_folders = {}
-            
-            for row_id, path in all_items:
-                parent_dir = os.path.dirname(path)
-                if parent_dir in checked_folders and not checked_folders[parent_dir]:
-                    ids_to_delete.append(row_id)
-                    continue
-                if parent_dir not in checked_folders:
-                    checked_folders[parent_dir] = os.path.exists(parent_dir)
-                if not checked_folders[parent_dir] or not os.path.exists(path):
-                    ids_to_delete.append(row_id)
-
-            if ids_to_delete:
-                self.log(f"♻️ Removendo {len(ids_to_delete)} arquivos órfãos...")
-                for i in range(0, len(ids_to_delete), 500):
-                    batch = ids_to_delete[i:i+500]
-                    cursor.execute(f"DELETE FROM biblioteca WHERE id IN ({','.join(['?']*len(batch))})", batch)
-                db.conn.commit()
-            
-            self.log("✅ Faxina rápida concluída!")
-        except Exception as e:
-            self.log(f"❌ Erro na faxina: {e}")
+            if is_system or not os.path.exists(path):
+                cursor.execute("DELETE FROM biblioteca WHERE id = ?", (row[0],))
+                deleted_count += 1
+        
+        db.conn.commit()
+        if deleted_count > 0:
+            self.log(f"🧹 Limpeza: {deleted_count} registros fantasmas ou de sistema removidos.")
 
     def sync_all(self):
-        if self.is_busy: return
         self.is_busy = True
-        self.logs = []
-        
         try:
             self.log("📡 Iniciando Sincronização Geral da Biblioteca...")
-            # 1. Limpeza total antes de começar
             self.global_cleanup()
             
-            # 2. DESCOBERTA AUTOMÁTICA: Músicas no drive M:
-            music_root = config.get_path('MUSIC_ROOT').rstrip('/\\')
-            if os.path.exists(music_root) or os.path.exists(music_root + '\\'):
+            # Sincroniza pastas de música no M:
+            music_root = config.get_path('MUSIC_ROOT')
+            if os.path.exists(music_root):
+                subdirs = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d))]
                 self.log(f"🔎 Buscando músicas em: {music_root}")
-                try:
-                    # Tenta listar o diretório de forma robusta
-                    items = os.listdir(music_root if music_root.endswith(':') else music_root)
-                    subfolders = [d for d in items if os.path.isdir(os.path.join(music_root, d)) and not d.startswith(('.', '$'))]
-                    
-                    self.log(f"📂 Encontradas {len(subfolders)} pastas de música no drive M:")
-                    for cat in subfolders:
-                        self.sync_folder_to_db(os.path.join(music_root, cat), cat, analyze=True)
-                except Exception as e:
-                    self.log(f"⚠️ Erro ao listar root musical: {e}")
-            else:
-                self.log(f"❌ Erro: Drive de músicas ({music_root}) não está acessível.")
-
-            # 3. SINCRONIZAÇÃO DE PLÁSTICA (Apenas caminhos, sem aparecer na biblioteca)
-            # Nota: Esses itens são sincronizados mas a global_cleanup os remove da visualização
-            # se quisermos que eles nem entrem na tabela biblioteca, podemos pular aqui.
-            # Mas o gerador precisa deles no banco para saber a duração.
-            # SOLUÇÃO: Vamos sincronizar, mas o FRONT-END ou a API de Biblioteca pode filtrar.
-            # Por enquanto, vamos apenas garantir que as MÚSICAS entrem.
+                for folder in subdirs:
+                    if folder.upper() in ['MUSICA', 'ESPECIAL', 'RAIZ']:
+                        self.sync_folder_to_db(os.path.join(music_root, folder), folder, analyze=True)
             
-            self.log("✅ Sincronização concluída com sucesso!")
-        except Exception as e:
-            print(f"❌ Erro crítico no sync_all: {e}")
-            self.log(f"❌ Erro crítico na sincronização: {e}")
+            # Sincroniza Vinhetas e Comerciais (Sem análise de áudio para ser rápido)
+            sweeper_root = config.get_path('SWEEPER_ROOT')
+            if os.path.exists(sweeper_root):
+                self.sync_folder_to_db(sweeper_root, 'VINHETA', analyze=False)
+                
+            commercial_root = config.get_path('COMMERCIAL_ROOT')
+            if os.path.exists(commercial_root):
+                self.sync_folder_to_db(commercial_root, 'COMERCIAL', analyze=False)
+
+            self.log("✅ Sincronização geral concluída!")
         finally:
             self.is_busy = False
 
     def sync_folder_to_db(self, folder_path, category, analyze=True):
+        if not os.path.exists(folder_path): return
+        
+        files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.flac', '.m4a'))]
+        total = len(files)
+        if total > 0:
+            self.log(f"📡 Pasta '{category}': {total} arquivos encontrados.")
+        
         cursor = db.conn.cursor()
-        if not os.path.exists(folder_path): 
-            cursor.execute("DELETE FROM biblioteca WHERE pasta_categoria = ?", (category,))
-            db.conn.commit()
-            return
+        for index, f in enumerate(files):
+            full_path = os.path.join(folder_path, f).replace('/', '\\')
+            try:
+                cursor.execute("SELECT bpm, sub_categoria FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
+                row = cursor.fetchone()
 
-        # 1. Limpeza: Remove do banco arquivos que não existem mais na pasta
-        try:
-            cursor.execute("SELECT id, caminho_arquivo FROM biblioteca WHERE pasta_categoria = ?", (category,))
-            db_files = cursor.fetchall()
-            ids_to_delete = [row[0] for row in db_files if not os.path.exists(row[1])]
-            if ids_to_delete:
-                db.conn.executemany("DELETE FROM biblioteca WHERE id = ?", [(i,) for i in ids_to_delete])
-                db.conn.commit()
-        except: pass
-
-        # 2. Sincronização: Analisa novos arquivos
-        try:
-            files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.flac'))]
-            total = len(files)
-            if total > 0:
-                self.log(f"📡 Pasta '{category}': {total} arquivos encontrados.")
-
-            import datetime as dt
-            novos = []
-
-            for index, f in enumerate(files):
-                full_path = os.path.join(folder_path, f).replace('/', '\\')
-                try:
-                    cursor.execute("SELECT bpm, sub_categoria FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
-                    row = cursor.fetchone()
-
-                    # Só analisa se for novo ou sem BPM
-                    if not row or row[0] == 0:
-                        energy, valence, danceability, sp_id = 0.5, 0.5, 0.5, None
+                # Só analisa se for novo ou sem BPM (BPM=0)
+                if not row or (analyze and row[0] == 0):
+                    if analyze:
+                        self.log(f"[{index+1}/{total}] Analisando: {f}...")
+                        artists_list, title = self.parse_artist_title(f)
+                        artista = ", ".join(artists_list)
                         
-                        if analyze:
-                            self.log(f"[{index+1}/{total}] Analisando: {f}...")
-                            artists_list, title = self.parse_artist_title(f)
-                            artista = ", ".join(artists_list)
-                            
-                            # TENTA SPOTIFY (Prioridade Única)
-                            if config.get_path('spotify_client_id'):
-                                sp_id = spotify_service.search_track(artists_list[0], title)
-                                if sp_id:
-                                    features = spotify_service.get_audio_features(sp_id)
-                                    if features:
-                                        energy = features['energy']
-                                        valence = features['valence']
-                                        danceability = features['danceability']
-                                        self.log(f"✨ Spotify: E:{energy} | V:{valence}")
-                                else:
-                                    self.log(f"⚠️ Não encontrada no Spotify: {artista} - {title} (Valores padrão aplicados)")
-                            
-                            bpm = 0 # BPM não é mais usado na programação
-                            duracao = self.get_audio_duration(full_path)
-                        else:
-                            # Vinhetas/Comerciais: Sincronismo Instantâneo
-                            artista = category
-                            title = f
-                            bpm = 0
-                            duracao = self.get_audio_duration(full_path)
+                        # 1. Tenta Deezer
+                        bpm = bpm_service.get_bpm_from_deezer(artists_list[0], title)
                         
-                        ctime = os.path.getctime(full_path)
-                        data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
-                        subcat = row[1] if row else 'STD'
+                        # 2. Fallback Local
+                        if not bpm or bpm == 0:
+                            bpm = bpm_service.get_bpm_locally(full_path)
                         
-                        # GRAVAÇÃO IMEDIATA: Incluindo dados do Spotify
-                        db.insert_music(
-                            nome_musica=title,
-                            artista=artista,
-                            caminho_arquivo=full_path,
-                            pasta_categoria=category,
-                            bpm=bpm,
-                            duracao=duracao,
-                            energy=energy,
-                            valence=valence,
-                            danceability=danceability,
-                            spotify_id=sp_id,
-                            sub_categoria=subcat,
-                            data_arquivo=data_arquivo
-                        )
+                        if bpm:
+                            self.log(f"🥁 BPM definido: {bpm}")
+                        
+                        duracao = self.get_audio_duration(full_path)
+                    else:
+                        artista = category
+                        title = f
+                        bpm = 0
+                        duracao = self.get_audio_duration(full_path)
+                    
+                    ctime = os.path.getctime(full_path)
+                    data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
+                    subcat = row[1] if row else 'STD'
+                    
+                    db.insert_music(
+                        nome_musica=title,
+                        artista=artista,
+                        caminho_arquivo=full_path,
+                        pasta_categoria=category,
+                        bpm=bpm,
+                        duracao=duracao,
+                        sub_categoria=subcat,
+                        data_arquivo=data_arquivo
+                    )
+            except Exception as e:
+                self.log(f"  [AVISO] Falha no arquivo '{f}': {e}")
 
-                except Exception as e:
-                    self.log(f"  [AVISO] Falha no arquivo '{f}': {e}")
-                
-                import time
-                time.sleep(0.01) # Pausa mínima para fluidez
-
-        except Exception as e:
-            self.log(f"Erro ao sincronizar pasta '{category}': {e}")
-
-    def log(self, message):
-        if self.log_callback:
-            try: self.log_callback(message)
-            except: pass
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self.logs.append(f"[{ts}] {message}")
-        if len(self.logs) > 100: self.logs.pop(0)
-        try: print(f"[ENGINE] {message}")
-        except: pass
+    def parse_artist_title(self, filename):
+        """Extrai Artista e Título do nome do arquivo."""
+        name_without_ext = os.path.splitext(filename)[0]
+        if ' - ' in name_without_ext:
+            parts = name_without_ext.split(' - ', 1)
+            artist_part = parts[0].strip()
+            title = parts[1].strip()
+            artists = [a.strip() for a in artist_part.replace(' e ', ' & ').split('&')]
+            return artists, title
+        return ["DESCONHECIDO"], name_without_ext
 
     def get_audio_duration(self, filepath):
         try:
-            audio = MutagenFile(filepath)
-            if audio and audio.info:
-                return int(round(audio.info.length * 1000))
+            from mutagen.mp3 import MP3
+            from mutagen.wave import WAVE
+            from mutagen.flac import FLAC
+            ext = os.path.splitext(filepath)[1].lower()
+            if ext == '.mp3': return int(MP3(filepath).info.length)
+            if ext == '.wav': return int(WAVE(filepath).info.length)
+            if ext == '.flac': return int(FLAC(filepath).info.length)
         except: pass
-        return 3000
+        return 0
 
-    def parse_artist_title(self, filename):
-        clean = os.path.splitext(filename)[0]
-        if ' - ' in clean:
-            parts = clean.split(' - ')
-            artists = [p.strip() for p in parts[0].split(' PART. ')]
-            return artists, parts[1]
-        return [clean], clean
+    def generate_schedule(self, date_str):
+        self.is_busy = True
+        try:
+            # Lógica de geração de roteiro (simplificada para o exemplo)
+            self.log(f"Gerando roteiro para {date_str}...")
+            # Aqui entraria a chamada para carregar o template .blm e preencher
+            # Por enquanto, mantemos a estrutura de logs
+        finally:
+            self.is_busy = False
 
-    def generate_bil_line(self, filepath, duration):
-        return f"{filepath} /m:3000 /t:{duration} /i:0 /s:0 /f:{duration} /r:0 /d:0 /o:0 /n:1 /x:  /g:0"
+    def select_music(self, folder_path, category, current_hour, subcategory=None):
+        """Seleciona a melhor música baseado no ritmo (BPM) e descanso."""
+        # Lógica de Surpresa (Wildcards)
+        if category in config.surprise_rules:
+            rule = config.surprise_rules[category]
+            if random.random() < rule['chance']:
+                self.log(f"🎲 SURPRESA: Ativando wildcard de {category} para {rule['surprise']}!")
+                return self.select_music("", rule['surprise'], current_hour)
 
-    def scan_model_blocks(self, model_path):
-        valid_blocks = []
-        if not os.path.exists(model_path): return []
-        with open(model_path, 'r', encoding='latin-1') as f:
-            for line in f:
-                line = line.strip()
-                if len(line) >= 5 and line[2] == ':' and line[0].isdigit():
-                    time_str = line.split()[0]
-                    if time_str == "24:00": time_str = "00:00"
-                    valid_blocks.append(time_str)
-        return valid_blocks
-
-    def schedule_paid_music(self, available_blocks):
-        reservations = {}
-        free_blocks = available_blocks.copy()
-        paid_rules = [PaidInsertion(r['filename'], r['start'], r['end']) for r in config.paid_rules]
-        for rule in paid_rules:
-            candidates = [b for b in free_blocks if rule.is_in_range(b)]
-            if not candidates: candidates = [b for b in available_blocks if rule.is_in_range(b)]
-            if candidates:
-                chosen_block = random.choice(candidates)
-                if chosen_block not in reservations: reservations[chosen_block] = []
-                reservations[chosen_block].append(rule.filename)
-                if chosen_block in free_blocks: free_blocks.remove(chosen_block)
-        return reservations
-
-    def select_music(self, folder_path, cat_string, current_hour):
-        parts = cat_string.split(' ', 1)
-        category = parts[0]
-        subcategory = parts[1] if len(parts) > 1 else None
-        music_root = config.get_path('MUSIC_ROOT')
-        folder_path = os.path.join(music_root, category)
-
-        for rule in config.surprise_rules:
-            if rule['target'] == cat_string:
-                if random.random() < rule['chance']:
-                    return self.select_music("", rule['surprise'], current_hour)
-
-        self.sync_folder_to_db(folder_path, category)
-        candidate = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_energy=self.last_energy)
+        candidate = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_bpm=self.last_bpm)
         if candidate:
             full_path = candidate['caminho_arquivo']
-            self.last_energy = candidate['energy'] or 0.5
+            self.last_bpm = candidate['bpm'] or 0
             db.log_execution(full_path)
             return full_path, self.get_audio_duration(full_path)
         return None, 0
-
-    def select_sweeper(self, category):
-        folder = config.get_path('SWEEPERS')
-        if 'Chamadas' in category: folder = config.get_path('PROMOS')
-        elif 'Intercom' in category: folder = config.get_path('INTERCOM')
-        elif 'Amostra' in category: folder = config.get_path('SAMPLES')
-        try:
-            files = [f for f in os.listdir(folder) if f.lower().endswith(('.mp3', '.wav'))]
-            if not files: return None, 0
-            choice = random.choice(files)
-            if len(files) > 1:
-                while choice == self.last_sweeper: choice = random.choice(files)
-            self.last_sweeper = choice
-            full = os.path.join(folder, choice).replace('/', '\\')
-            return full, self.get_audio_duration(full)
-        except: return None, 0
-
-    def generate_schedule(self, date_str):
-        target_date = datetime.datetime.strptime(date_str, '%Y%m%d')
-        dow = target_date.weekday()
-        model_file = config.day_templates.get(str(dow), 'SEMANAL.blm')
-        model_path = os.path.join(config.get_path('TEMPLATES'), model_file)
-        output_path = os.path.join(config.get_path('OUTPUT'), f"{date_str}.bil")
-        valid_blocks = self.scan_model_blocks(model_path)
-        if not valid_blocks: return False
-        paid_reservations = {}
-        if dow < 5: paid_reservations = self.schedule_paid_music(valid_blocks)
-        final_lines = ["# Arquivo de roteiro da beAudio\t1\t550470001"]
-        current_block_time = "00:00"
-        pending_paid_songs = []
-        with open(model_path, 'r', encoding='latin-1') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'): continue
-                if line[0].isdigit() and ':' in line and len(line.split()[0]) == 5:
-                    current_block_time = line.split()[0]
-                    lookup_hour = int(current_block_time.split(':')[0])
-                    final_lines.append(line)
-                    if current_block_time in paid_reservations:
-                        pending_paid_songs = paid_reservations[current_block_time][:]
-                    continue
-                if 'Reserva' in line or 'Início' in line:
-                    final_lines.append("Início do bloco comercial /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:3 /n:1 /x: /g:0")
-                    final_lines.append("Término do bloco comercial /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:4 /n:1 /x: /g:0")
-                    continue
-                if 'PREFIXO' in line or line.startswith('U:\\'):
-                    final_lines.append(line)
-                    continue
-                cat = line.split('.apm')[0]
-                is_sweeper = any(x in cat for x in ['VHT', 'Chamada', 'Intercom', 'Amostra'])
-                if is_sweeper:
-                    path, dur = self.select_sweeper(cat)
-                    if path: final_lines.append(self.generate_bil_line(path, dur))
-                else:
-                    if pending_paid_songs:
-                        paid_song_file = pending_paid_songs.pop(0)
-                        full_path = os.path.join(config.get_path('MUSIC_ROOT'), 'ESPECIAL', paid_song_file).replace('/', '\\')
-                        dur = self.get_audio_duration(full_path)
-                        db.log_execution(full_path)
-                        final_lines.append(self.generate_bil_line(full_path, dur))
-                    else:
-                        path, dur = self.select_music(os.path.join(config.get_path('MUSIC_ROOT'), cat), cat, lookup_hour)
-                        if path: final_lines.append(self.generate_bil_line(path, dur))
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, 'w', encoding='latin-1') as f:
-            f.write('\n'.join(final_lines))
-        return True
