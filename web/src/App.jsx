@@ -39,7 +39,7 @@ function App() {
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
-  const [bpmEnergy, setBpmEnergy] = useState('')
+  const [energyLevel, setEnergyLevel] = useState('')
   const [sortBy, setSortBy] = useState('artista')
   
   // Player State
@@ -117,7 +117,7 @@ function App() {
   // Filtros imediatos (dropdowns)
   useEffect(() => {
     fetchLibrary({ page: 1 })
-  }, [filterCategory, filterGroup, bpmEnergy, sortBy])
+  }, [filterCategory, filterGroup, energyLevel, sortBy])
 
   useEffect(() => {
     const el = logContainerRef.current
@@ -163,7 +163,7 @@ function App() {
       if (opts.search  ?? searchTerm)  params.set('search',   opts.search  ?? searchTerm)
       if (opts.category ?? filterCategory) params.set('category', opts.category ?? filterCategory)
       if (opts.group    ?? filterGroup)    params.set('group',    opts.group    ?? filterGroup)
-      if (opts.bpm      ?? bpmEnergy)      params.set('bpm',      opts.bpm      ?? bpmEnergy)
+      if (opts.energy_level ?? energyLevel) params.set('energy_level', opts.energy_level ?? energyLevel)
       if (opts.sort     ?? sortBy)         params.set('sort',     opts.sort     ?? sortBy)
       const res = await safeFetch(`${API_URL}/library?${params}`)
       const data = await res.json()
@@ -487,14 +487,14 @@ function App() {
             ))}
           </select>
           <select 
-            value={bpmEnergy} 
-            onChange={e => setBpmEnergy(e.target.value)}
+            value={energyLevel} 
+            onChange={e => setEnergyLevel(e.target.value)}
             style={{padding: '0.6rem', width: '130px', fontSize: '0.85rem'}}
           >
-            <option value="">Energia (BPM)</option>
-            <option value="L">Baixa (L)</option>
+            <option value="">Intensidade</option>
+            <option value="L">Calma (L)</option>
             <option value="M">Média (M)</option>
-            <option value="H">Alta (H)</option>
+            <option value="H">Agitada (H)</option>
           </select>
           <select 
             value={filterGroup} 
@@ -555,7 +555,8 @@ function App() {
               <th style={{textAlign: 'left', padding: '1rem'}}>MÚSICA</th>
               <th style={{width: '110px', textAlign: 'left', padding: '1rem'}}>PASTA</th>
               <th style={{width: '105px', textAlign: 'left', padding: '1rem'}}>GRUPO</th>
-              <th style={{width: '70px', textAlign: 'left', padding: '1rem'}}>BPM</th>
+              <th style={{width: '100px', textAlign: 'left', padding: '1rem'}}>ENERGIA</th>
+              <th style={{width: '70px', textAlign: 'left', padding: '1rem'}}>VIBE</th>
               <th style={{width: '75px', textAlign: 'left', padding: '1rem'}}>PESO</th>
             </tr>
           </thead>
@@ -580,8 +581,18 @@ function App() {
                     {rotationGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
                   </select>
                 </td>
-                <td style={{color: track.bpm > 120 ? 'var(--error)' : track.bpm < 80 ? 'var(--accent-color)' : 'var(--success)'}}>
-                  {Math.round(track.bpm)}
+                <td>
+                  <div style={{width: '100%', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '10px', overflow: 'hidden'}} title={`Energia: ${Math.round(track.energy * 100)}%`}>
+                    <div style={{width: `${track.energy * 100}%`, height: '100%', background: `linear-gradient(90deg, #00f2ff, #bc13fe)`}}></div>
+                  </div>
+                </td>
+                <td style={{textAlign: 'center', fontSize: '0.8rem'}}>
+                   <span style={{
+                     color: track.valence > 0.6 ? '#00ffaa' : track.valence < 0.4 ? '#ff2d55' : '#ffaa00',
+                     fontWeight: 800
+                   }}>
+                     {track.valence > 0.6 ? '😊' : track.valence < 0.4 ? '😔' : '😐'}
+                   </span>
                 </td>
                 <td>
                   <input 

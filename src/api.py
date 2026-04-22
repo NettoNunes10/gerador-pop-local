@@ -97,7 +97,7 @@ def get_library(
     search: Optional[str] = None,
     category: Optional[str] = None,
     group: Optional[str] = None,
-    bpm: Optional[str] = None,
+    energy_level: Optional[str] = None,
     sort: str = "artista"
 ):
     conditions = []
@@ -112,37 +112,43 @@ def get_library(
     if group:
         conditions.append("sub_categoria = ?")
         params.append(group)
-    if bpm == "L":
-        conditions.append("bpm < 80")
-    elif bpm == "M":
-        conditions.append("bpm >= 80 AND bpm <= 120")
-    elif bpm == "H":
-        conditions.append("bpm > 120")
+    
+    # Filtros de Energia em vez de BPM
+    if energy_level == "L":
+        conditions.append("energy < 0.4")
+    elif energy_level == "M":
+        conditions.append("energy >= 0.4 AND energy <= 0.7")
+    elif energy_level == "H":
+        conditions.append("energy > 0.7")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     sort_map = {
         "artista": "artista ASC",
         "nome": "nome_musica ASC",
         "data_desc": "data_arquivo DESC NULLS LAST",
-        "data_asc": "data_arquivo ASC NULLS LAST",
-        "peso_desc": "peso_especifico DESC",
+        "energy_desc": "energy DESC",
+        "energy_asc": "energy ASC",
     }
     order = sort_map.get(sort, "artista ASC")
 
     count_row = db.conn.execute(f"SELECT COUNT(*) FROM biblioteca {where}", params).fetchone()
     total = count_row[0]
     offset = (page - 1) * limit
-    rows = db.conn.execute(
-        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
-        params + [limit, offset]
-    ).fetchall()
+    
+    query = f"""
+        SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, 
+               sub_categoria, data_arquivo, energy, valence, danceability 
+        FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?
+    """
+    rows = db.conn.execute(query, params + [limit, offset]).fetchall()
 
     return {
         "items": [
             {
                 "id": r[0], "nome": r[1], "artista": r[2],
                 "categoria": r[3], "bpm": r[4], "peso": r[5],
-                "sub_categoria": r[6], "data_arquivo": r[7]
+                "sub_categoria": r[6], "data_arquivo": r[7],
+                "energy": r[8], "valence": r[9], "danceability": r[10]
             } for r in rows
         ],
         "total": total,
@@ -152,19 +158,28 @@ def get_library(
 
 @app.put("/library/{track_id}")
 def update_track_metadata(track_id: int, data: dict = Body(...)):
+    if "energy" in data:
+        db.conn.execute("UPDATE biblioteca SET energy = ? WHERE id = ?", (float(data["energy"]), track_id))
+        db.conn.commit()
+    if "valence" in data:
+        db.conn.execute("UPDATE biblioteca SET valence = ? WHERE id = ?", (float(data["valence"]), track_id))
+        db.conn.commit()
+    
     if "weight" in data:
         new_weight = float(data["weight"])
         new_group = config.get_group_for_weight(new_weight)
         db.update_weight(track_id, new_weight)
         db.update_subcategory(track_id, new_group)
         return {"status": "updated", "new_weight": new_weight, "new_group": new_group}
+    
     if "sub_categoria" in data:
         new_group = data["sub_categoria"]
         new_weight = config.get_base_weight_for_group(new_group)
         db.update_subcategory(track_id, new_group)
         db.update_weight(track_id, new_weight)
         return {"status": "updated", "new_group": new_group, "new_weight": new_weight}
-    return {"status": "no_change"}
+    
+    return {"status": "updated"}
 
 @app.post("/library/batch")
 def batch_update_library(data: dict = Body(...)):
