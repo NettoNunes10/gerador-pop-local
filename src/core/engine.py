@@ -160,40 +160,24 @@ class PlaylistEngine:
                         ctime = os.path.getctime(full_path)
                         data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
                         subcat = row[1] if row else 'STD'
-                        novos.append((full_path, artista, title, category, bpm, subcat, data_arquivo, duracao))
-
-                        if len(novos) >= 20:
-                            db.conn.executemany('''
-                                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo, duracao)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(caminho_arquivo) DO UPDATE SET
-                                    artista=excluded.artista, nome_musica=excluded.nome_musica,
-                                    pasta_categoria=excluded.pasta_categoria, bpm=excluded.bpm,
-                                    sub_categoria=excluded.sub_categoria,
-                                    data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo),
-                                    duracao=excluded.duracao
-                            ''', novos)
-                            db.conn.commit()
-                            novos = []
+                        
+                        # GRAVAÇÃO IMEDIATA: Mais seguro e feedback em tempo real
+                        db.insert_music(
+                            nome_musica=title,
+                            artista=artista,
+                            caminho_arquivo=full_path,
+                            pasta_categoria=category,
+                            bpm=bpm,
+                            duracao=duracao,
+                            sub_categoria=subcat,
+                            data_arquivo=data_arquivo
+                        )
 
                 except Exception as e:
                     self.log(f"  [AVISO] Falha no arquivo '{f}': {e}")
                 
                 import time
                 time.sleep(0.01) # Pausa mínima para fluidez
-
-            if novos:
-                db.conn.executemany('''
-                    INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo, duracao)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(caminho_arquivo) DO UPDATE SET
-                        artista=excluded.artista, nome_musica=excluded.nome_musica,
-                        pasta_categoria=excluded.pasta_categoria, bpm=excluded.bpm,
-                        sub_categoria=excluded.sub_categoria,
-                        data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo),
-                        duracao=excluded.duracao
-                ''', novos)
-                db.conn.commit()
 
         except Exception as e:
             self.log(f"Erro ao sincronizar pasta '{category}': {e}")
