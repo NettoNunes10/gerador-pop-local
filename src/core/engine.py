@@ -18,26 +18,32 @@ class PlaylistEngine:
         self.log("🧹 Iniciando limpeza global de arquivos fantasmas...")
         try:
             cursor = db.conn.cursor()
-            cursor.execute("SELECT id, caminho_arquivo FROM biblioteca")
+            cursor.execute("SELECT id, caminho_arquivo, nome_musica FROM biblioteca")
             all_files = cursor.fetchall()
             
             ids_to_delete = []
-            for row_id, path in all_files:
-                if not os.path.exists(path):
+            for row_id, path, name in all_files:
+                # Normalização radical para Windows
+                clean_path = os.path.abspath(path.replace('/', '\\')).strip()
+                
+                if not os.path.exists(clean_path):
                     ids_to_delete.append(row_id)
+                    # self.log(f"🗑️ Detectado fantasma: {name}")
             
             if ids_to_delete:
-                # Deleta em lotes para evitar travar o banco
-                for i in range(0, len(ids_to_delete), 500):
-                    batch = ids_to_delete[i:i+500]
+                self.log(f"♻️ Removendo {len(ids_to_delete)} itens que não existem mais no disco...")
+                for i in range(0, len(ids_to_delete), 100):
+                    batch = ids_to_delete[i:i+100]
                     placeholders = ', '.join(['?'] * len(batch))
                     cursor.execute(f"DELETE FROM biblioteca WHERE id IN ({placeholders})", batch)
                 db.conn.commit()
-                self.log(f"✅ Limpeza concluída: {len(ids_to_delete)} arquivos removidos.")
+                self.log(f"✅ Limpeza concluída com sucesso.")
             else:
-                self.log("✅ Nenhum arquivo fantasma encontrado.")
+                self.log("✅ A biblioteca já está limpa. Nenhum arquivo fantasma encontrado.")
         except Exception as e:
             self.log(f"❌ Erro na limpeza global: {e}")
+            import traceback
+            print(traceback.format_exc())
 
     def sync_all(self):
         if self.state.is_busy: return
