@@ -50,14 +50,22 @@ class DatabaseManager:
                 bpm REAL,
                 peso_especifico REAL DEFAULT 1.0,
                 data_arquivo TEXT,
-                duracao INTEGER DEFAULT 0
+                duracao INTEGER DEFAULT 0,
+                energy REAL DEFAULT 0.5,
+                valence REAL DEFAULT 0.5,
+                danceability REAL DEFAULT 0.5,
+                spotify_id TEXT
             )
         ''')
         # Migrações para colunas faltantes
         migrations = [
             "ALTER TABLE biblioteca ADD COLUMN sub_categoria TEXT",
             "ALTER TABLE biblioteca ADD COLUMN data_arquivo TEXT",
-            "ALTER TABLE biblioteca ADD COLUMN duracao INTEGER DEFAULT 0"
+            "ALTER TABLE biblioteca ADD COLUMN duracao INTEGER DEFAULT 0",
+            "ALTER TABLE biblioteca ADD COLUMN energy REAL DEFAULT 0.5",
+            "ALTER TABLE biblioteca ADD COLUMN valence REAL DEFAULT 0.5",
+            "ALTER TABLE biblioteca ADD COLUMN danceability REAL DEFAULT 0.5",
+            "ALTER TABLE biblioteca ADD COLUMN spotify_id TEXT"
         ]
         for col_def in migrations:
             try:
@@ -95,21 +103,29 @@ class DatabaseManager:
             conn.execute("VACUUM")
         except: pass
 
-    def insert_music(self, nome_musica, artista, caminho_arquivo, pasta_categoria, bpm, duracao, sub_categoria='STD', data_arquivo=None):
-        """Método unificado para inserção de músicas e vinhetas."""
+    def insert_music(self, nome_musica, artista, caminho_arquivo, pasta_categoria, bpm, duracao, energy=0.5, valence=0.5, danceability=0.5, spotify_id=None, sub_categoria='STD', data_arquivo=None):
+        """Método unificado para inserção de músicas e vinhetas com suporte a Spotify."""
         try:
             self.conn.execute('''
-                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo, duracao)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO biblioteca (
+                    caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, duracao, 
+                    energy, valence, danceability, spotify_id, sub_categoria, data_arquivo
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(caminho_arquivo) DO UPDATE SET
                     artista=excluded.artista,
                     nome_musica=excluded.nome_musica,
                     pasta_categoria=excluded.pasta_categoria,
                     bpm=excluded.bpm,
+                    duracao=excluded.duracao,
+                    energy=excluded.energy,
+                    valence=excluded.valence,
+                    danceability=excluded.danceability,
+                    spotify_id=excluded.spotify_id,
                     sub_categoria=excluded.sub_categoria,
-                    data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo),
-                    duracao=excluded.duracao
-            ''', (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo, duracao))
+                    data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
+            ''', (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, duracao, 
+                  energy, valence, danceability, spotify_id, sub_categoria, data_arquivo))
             self.conn.commit()
         except Exception as e:
             print(f"Erro ao inserir música: {e}")
