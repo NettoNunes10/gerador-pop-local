@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import os
 import datetime
 import logging
+import urllib.parse
 from .core.config import config
 from .core.engine import PlaylistEngine
 from .core.database import db

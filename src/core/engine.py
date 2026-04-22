@@ -13,6 +13,45 @@ class PlaylistEngine:
         self.last_bpm = 0
         self.log_callback = log_callback
 
+    def global_cleanup(self):
+        """Remove do banco QUALQUER arquivo que não exista mais fisicamente."""
+        self.log("🧹 Iniciando limpeza global de arquivos fantasmas...")
+        try:
+            cursor = db.conn.cursor()
+            cursor.execute("SELECT id, caminho_arquivo FROM biblioteca")
+            all_files = cursor.fetchall()
+            
+            ids_to_delete = []
+            for row_id, path in all_files:
+                if not os.path.exists(path):
+                    ids_to_delete.append(row_id)
+            
+            if ids_to_delete:
+                # Deleta em lotes para evitar travar o banco
+                for i in range(0, len(ids_to_delete), 500):
+                    batch = ids_to_delete[i:i+500]
+                    placeholders = ', '.join(['?'] * len(batch))
+                    cursor.execute(f"DELETE FROM biblioteca WHERE id IN ({placeholders})", batch)
+                db.conn.commit()
+                self.log(f"✅ Limpeza concluída: {len(ids_to_delete)} arquivos removidos.")
+            else:
+                self.log("✅ Nenhum arquivo fantasma encontrado.")
+        except Exception as e:
+            self.log(f"❌ Erro na limpeza global: {e}")
+
+    def sync_all(self):
+        if self.state.is_busy: return
+        self.state.is_busy = True
+        self.state.logs = []
+        
+        try:
+            # 1. Limpeza total antes de começar
+            self.global_cleanup()
+            
+            # 2. Sincroniza pastas configuradas
+            self.log("📡 Iniciando sincronização de pastas...")
+            for category, folder in config.paths.items():
+
     def log(self, message):
         if self.log_callback:
             try:
