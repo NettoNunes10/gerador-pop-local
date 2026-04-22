@@ -24,9 +24,7 @@ def run_app():
     audio_proc = subprocess.Popen(
         ["npx", "http-server", music_root, "-p", "8001", "--cors", "-c-1"],
         cwd=os.getcwd(),
-        shell=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        shell=True
     )
 
     # 2. Iniciar o Backend (FastAPI)

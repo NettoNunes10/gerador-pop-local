@@ -87,7 +87,13 @@ class PlaylistEngine:
         return reservations
 
     def sync_folder_to_db(self, folder_path, category):
-        if not os.path.exists(folder_path): return
+        cursor = db.conn.cursor()
+        if not os.path.exists(folder_path): 
+            # Se a pasta não existe mais, deletamos tudo dessa categoria do banco
+            cursor.execute("DELETE FROM biblioteca WHERE pasta_categoria = ?", (category,))
+            db.conn.commit()
+            self.log(f"📁 Pasta '{category}' não encontrada no disco. Categoria removida do banco.")
+            return
 
         # 1. Limpeza: Remove do banco arquivos que não existem mais na pasta
         try:
