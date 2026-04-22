@@ -51,14 +51,17 @@ class PlaylistEngine:
             self.log("📡 Iniciando Sincronização Geral da Biblioteca...")
             self.global_cleanup()
             
-            # Sincroniza pastas de música no M:
+            # Sincroniza todas as pastas de música no M:
             music_root = config.get_path('MUSIC_ROOT')
             if os.path.exists(music_root):
                 subdirs = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d))]
                 self.log(f"🔎 Buscando músicas em: {music_root}")
+                
+                system_folders = ['SAMPLES', 'INTERCOM', 'TEMPLATES', 'SETTINGS', '$RECYCLE.BIN', 'SYSTEM VOLUME INFORMATION']
+                
                 for folder in subdirs:
-                    if folder.upper() in ['MUSICA', 'ESPECIAL', 'RAIZ']:
-                        self.sync_folder_to_db(os.path.join(music_root, folder), folder, analyze=True)
+                    if folder.upper() not in system_folders:
+                        self.sync_folder_to_db(os.path.join(music_root, folder), folder.upper(), analyze=True)
             
             # Sincroniza Vinhetas e Comerciais (Sem análise de áudio para ser rápido)
             sweeper_root = config.get_path('SWEEPER_ROOT')
