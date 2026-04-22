@@ -7,6 +7,7 @@ import datetime
 import logging
 import urllib.parse
 import shutil
+import threading
 from typing import Optional
 from .core.config import config
 from .core.engine import PlaylistEngine
