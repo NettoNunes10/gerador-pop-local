@@ -80,20 +80,29 @@ class PlaylistEngine:
             # 1. Limpeza total antes de começar
             self.global_cleanup()
             
-            # 2. Sincroniza pastas configuradas (exceto sistema)
-            system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE', 'MUSIC_ROOT']
+            # 2. DESCOBERTA AUTOMÁTICA: Escaneia pastas dentro do MUSIC_ROOT (Músicas)
+            music_root = config.get_path('MUSIC_ROOT')
+            if os.path.exists(music_root):
+                self.log(f"🔎 Escaneando categorias de música em: {music_root}")
+                # Lista apenas diretórios que não começam com ponto ou cifrão
+                subfolders = [d for d in os.listdir(music_root) 
+                             if os.path.isdir(os.path.join(music_root, d)) 
+                             and not d.startswith(('.', '$'))]
+                
+                for cat in subfolders:
+                    folder_path = os.path.join(music_root, cat)
+                    self.sync_folder_to_db(folder_path, cat, analyze=True)
             
+            # 3. SINCRONIZAÇÃO DE PLÁSTICA: Pastas do config (VHTs, Promos, etc.)
+            system_folders = ['TEMPLATES', 'OUTPUT', 'LOGS', 'SAMPLES', 'DATABASE', 'MUSIC_ROOT']
             for category, folder in config.paths.items():
                 cat_upper = category.upper()
-                
-                # Pula se for pasta de sistema ou o próprio ROOT (que é só uma referência)
                 if cat_upper in system_folders:
                     continue
                 
                 if os.path.exists(folder):
-                    # Pula análise pesada apenas para o que for explicitamente vinheta/comercial/sweep
-                    is_plastic = any(x in cat_upper for x in ['VINHETAS', 'COMERCIAIS', 'PREFIXO', 'ENCERRAMENTO', 'VHT', 'PROMO', 'SWEEP', 'INTERCOM'])
-                    self.sync_folder_to_db(folder, category, analyze=not is_plastic)
+                    # Vinhetas e elementos de plástica: Sincronismo rápido (sem BPM)
+                    self.sync_folder_to_db(folder, category, analyze=False)
             
             self.log("✅ Sincronização concluída com sucesso!")
         except Exception as e:
