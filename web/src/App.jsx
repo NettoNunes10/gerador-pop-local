@@ -293,17 +293,21 @@ function App() {
     } catch (e) { console.error(e) }
   }
 
-  const handleBatchUpdate = async (newGroup) => {
+  const handleBatchUpdate = async (newGroup, weight = null) => {
     if (selectedTracks.size === 0) return
     const track_ids = [...selectedTracks]
+    const body = { track_ids }
+    if (newGroup) body.sub_categoria = newGroup
+    if (weight !== null) body.weight = weight
+
     const res = await fetch(`${API_URL}/library/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ track_ids, sub_categoria: newGroup })
+      body: JSON.stringify(body)
     })
     const result = await res.json()
     setLibrary(library.map(t => track_ids.includes(t.id)
-      ? { ...t, sub_categoria: result.new_group, peso: result.new_weight }
+      ? { ...t, sub_categoria: result.new_group || t.sub_categoria, peso: result.new_weight || t.peso }
       : t
     ))
     setSelectedTracks(new Set())
@@ -482,19 +486,19 @@ function App() {
             style={{padding: '0.6rem', width: '150px', fontSize: '0.85rem'}}
           >
             <option value="">Todas Pastas</option>
-            {[...new Set(library.map(t => t.categoria))].map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
+            {stats.categories.map(cat => (
+              <option key={cat.name} value={cat.name}>{cat.name}</option>
             ))}
           </select>
           <select 
-            value={energyLevel} 
-            onChange={e => setEnergyLevel(e.target.value)}
+            value={bpm} 
+            onChange={e => setBpm(e.target.value)}
             style={{padding: '0.6rem', width: '130px', fontSize: '0.85rem'}}
           >
-            <option value="">Intensidade</option>
-            <option value="L">Calma (L)</option>
-            <option value="M">Média (M)</option>
-            <option value="H">Agitada (H)</option>
+            <option value="">Ritmo (BPM)</option>
+            <option value="L">Lento (L)</option>
+            <option value="M">Médio (M)</option>
+            <option value="H">Rápido (H)</option>
           </select>
           <select 
             value={filterGroup} 
@@ -541,6 +545,17 @@ function App() {
               {g.name}
             </button>
           ))}
+
+          <div style={{width: '1px', height: '20px', background: 'rgba(255,255,255,0.1)', margin: '0 0.5rem'}}></div>
+          
+          <span style={{opacity: 0.5, fontSize: '0.8rem'}}>Peso:</span>
+          {[0.5, 1.0, 1.5, 2.0, 2.5].map(w => (
+            <button key={w} onClick={() => handleBatchUpdate(null, w)}
+              style={{padding: '0.3rem 0.6rem', fontSize: '0.78rem', fontWeight: 700, borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer'}}>
+              {w.toFixed(1)}
+            </button>
+          ))}
+          
           <button onClick={() => setSelectedTracks(new Set())} style={{marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6}}><X size={16}/></button>
         </div>
       )}

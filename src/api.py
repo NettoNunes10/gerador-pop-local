@@ -128,6 +128,8 @@ def get_library(
         "data_desc": "data_arquivo DESC NULLS LAST",
         "bpm_desc": "bpm DESC",
         "bpm_asc": "bpm ASC",
+        "peso_desc": "peso_especifico DESC",
+        "peso_asc": "peso_especifico ASC",
     }
     order = sort_map.get(sort, "artista ASC")
 
@@ -184,6 +186,15 @@ def batch_update_library(data: dict = Body(...)):
     track_ids = data.get("track_ids", [])
     if not track_ids:
         raise HTTPException(status_code=400, detail="Nenhum track selecionado")
+    
+    if "weight" in data:
+        new_weight = float(data["weight"])
+        new_group = config.get_group_for_weight(new_weight)
+        for tid in track_ids:
+            db.update_weight(tid, new_weight)
+            db.update_subcategory(tid, new_group)
+        return {"status": "updated", "count": len(track_ids), "new_weight": new_weight, "new_group": new_group}
+
     if "sub_categoria" in data:
         new_group = data["sub_categoria"]
         new_weight = config.get_base_weight_for_group(new_group)
@@ -191,6 +202,7 @@ def batch_update_library(data: dict = Body(...)):
             db.update_subcategory(tid, new_group)
             db.update_weight(tid, new_weight)
         return {"status": "updated", "count": len(track_ids), "new_group": new_group, "new_weight": new_weight}
+    
     return {"status": "no_change"}
 
 # --- Tasks de Segundo Plano ---
