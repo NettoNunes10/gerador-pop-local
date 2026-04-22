@@ -16,38 +16,64 @@ class PlaylistEngine:
         self.logs = []
 
     def global_cleanup(self):
-        """Remove do banco QUALQUER arquivo que não exista mais fisicamente."""
-        self.log("🧹 Iniciando limpeza global de arquivos fantasmas...")
+        """Versão Otimizada: Remove arquivos fantasmas verificando pastas primeiro."""
+        self.log("🚀 Iniciando faxina rápida da biblioteca...")
         try:
             cursor = db.conn.cursor()
-            cursor.execute("SELECT id, caminho_arquivo, nome_musica, pasta_categoria FROM biblioteca")
-            all_files = cursor.fetchall()
             
+            # 1. Pegar todas as categorias (pastas) únicas no banco
+            cursor.execute("SELECT DISTINCT pasta_categoria FROM biblioteca")
+            categories_in_db = [r[0] for r in cursor.fetchall()]
+            
+            # 2. Verificar quais categorias não existem mais no config ou no disco
+            active_folders = {cat: folder for cat, folder in config.paths.items() if os.path.exists(folder)}
+            
+            for db_cat in categories_in_db:
+                # Se a pasta da categoria não existe no disco, deleta tudo dela de uma vez
+                if db_cat not in active_folders:
+                    self.log(f"🗑️ Categoria '{db_cat}' não encontrada no disco. Removendo tudo...")
+                    cursor.execute("DELETE FROM biblioteca WHERE pasta_categoria = ?", (db_cat,))
+            
+            db.conn.commit()
+
+            # 3. Verificação de arquivos órfãos em pastas que EXISTEM (Abordagem de Conjunto)
+            # Para não ser lento, fazemos isso apenas em lotes ou de forma inteligente
+            cursor.execute("SELECT id, caminho_arquivo FROM biblioteca")
+            all_items = cursor.fetchall()
+            
+            # Checagem rápida de amostragem ou pastas raiz
             ids_to_delete = []
-            for row_id, path, name, category in all_files:
-                # Normalização radical para Windows
-                clean_path = os.path.abspath(path.replace('/', '\\')).strip()
-                
-                # SE a categoria for 'SERTANEJO B' e a pasta não existe, deleta sem perguntar
-                if category == 'SERTANEJO B' or not os.path.exists(clean_path):
-                    ids_to_delete.append(row_id)
-                    if len(ids_to_delete) <= 20: # Loga os primeiros 20 no painel
-                        self.log(f"🗑️ Removendo fantasma: {name} [{category}]")
-                    elif len(ids_to_delete) == 21:
-                        self.log("... e muitos outros arquivos.")
+            checked_folders = {} # Cache de pastas que já validamos
             
+            for row_id, path in all_items:
+                parent_dir = os.path.dirname(path)
+                
+                # Se já sabemos que a pasta pai não existe, deleta
+                if parent_dir in checked_folders and not checked_folders[parent_dir]:
+                    ids_to_delete.append(row_id)
+                    continue
+                
+                if parent_dir not in checked_folders:
+                    checked_folders[parent_dir] = os.path.exists(parent_dir)
+                
+                if not checked_folders[parent_dir]:
+                    ids_to_delete.append(row_id)
+                else:
+                    # Se a pasta existe, checamos o arquivo (apenas se necessário)
+                    # Para manter a velocidade, aqui poderíamos ser mais seletivos
+                    if not os.path.exists(path):
+                        ids_to_delete.append(row_id)
+
             if ids_to_delete:
-                self.log(f"♻️ Faxina: Removendo {len(ids_to_delete)} registros do banco de dados...")
-                for i in range(0, len(ids_to_delete), 100):
-                    batch = ids_to_delete[i:i+100]
-                    placeholders = ', '.join(['?'] * len(batch))
-                    cursor.execute(f"DELETE FROM biblioteca WHERE id IN ({placeholders})", batch)
+                self.log(f"♻️ Removendo {len(ids_to_delete)} arquivos órfãos...")
+                for i in range(0, len(ids_to_delete), 500):
+                    batch = ids_to_delete[i:i+500]
+                    cursor.execute(f"DELETE FROM biblioteca WHERE id IN ({','.join(['?']*len(batch))})", batch)
                 db.conn.commit()
-                self.log(f"✅ Faxina concluída! {len(ids_to_delete)} itens removidos.")
-            else:
-                self.log("✅ A biblioteca já está limpa. Nenhum fantasma encontrado.")
+            
+            self.log("✅ Faxina rápida concluída!")
         except Exception as e:
-            self.log(f"❌ Erro na limpeza global: {e}")
+            self.log(f"❌ Erro na faxina: {e}")
 
     def sync_all(self):
         if self.is_busy: return
