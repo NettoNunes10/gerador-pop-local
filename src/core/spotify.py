@@ -99,7 +99,12 @@ class SpotifyService:
     def get_audio_features(self, spotify_id):
         """Captura os dados de Energia, Valence e Danceability."""
         token = self._get_token()
-        if not token or not spotify_id: return None
+        if not token: 
+            return None
+
+        if not spotify_id:
+            print("[SPOTIFY] ⚠️ ID do Spotify inválido para análise.")
+            return None
 
         url = f"https://api.spotify.com/v1/audio-features/{spotify_id}"
         headers = {"Authorization": f"Bearer {token}"}
@@ -108,17 +113,20 @@ class SpotifyService:
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
                 data = response.json()
-                return {
-                    'energy': data.get('energy', 0.5),
-                    'valence': data.get('valence', 0.5),
-                    'danceability': data.get('danceability', 0.5)
-                }
+                if data:
+                    return {
+                        'energy': data.get('energy', 0.5),
+                        'valence': data.get('valence', 0.5),
+                        'danceability': data.get('danceability', 0.5)
+                    }
             elif response.status_code == 429:
                 retry_after = int(response.headers.get('Retry-After', 5))
                 time.sleep(retry_after)
                 return self.get_audio_features(spotify_id)
+            else:
+                print(f"[SPOTIFY] ❌ Erro ao capturar features (Status {response.status_code}): {response.text}")
         except Exception as e:
-            print(f"[SPOTIFY] Erro ao obter features: {e}")
+            print(f"[SPOTIFY] ❌ Exceção ao obter features: {e}")
         return None
 
 spotify_service = SpotifyService()
