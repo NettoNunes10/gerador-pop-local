@@ -12,6 +12,8 @@ class PlaylistEngine:
         self.last_sweeper = ""
         self.last_bpm = 0
         self.log_callback = log_callback
+        self.is_busy = False
+        self.logs = []
 
     def global_cleanup(self):
         """Remove do banco QUALQUER arquivo que não exista mais fisicamente."""
@@ -50,24 +52,26 @@ class PlaylistEngine:
             self.log(f"❌ Erro na limpeza global: {e}")
 
     def sync_all(self):
-        if self.state.is_busy: return
-        self.state.is_busy = True
-        self.state.logs = []
+        if self.is_busy: return
+        self.is_busy = True
+        self.logs = []
         
         try:
+            self.log("📡 Iniciando Sincronização Geral da Biblioteca...")
             # 1. Limpeza total antes de começar
             self.global_cleanup()
             
             # 2. Sincroniza pastas configuradas
-            self.log("📡 Iniciando sincronização de pastas...")
             for category, folder in config.paths.items():
-                self.sync_folder_to_db(folder, category)
+                if os.path.exists(folder):
+                    self.sync_folder_to_db(folder, category)
             
             self.log("✅ Sincronização concluída com sucesso!")
         except Exception as e:
+            print(f"❌ Erro crítico no sync_all: {e}")
             self.log(f"❌ Erro crítico na sincronização: {e}")
         finally:
-            self.state.is_busy = False
+            self.is_busy = False
 
     def log(self, message):
         if self.log_callback:

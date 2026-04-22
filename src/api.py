@@ -25,19 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class State:
-    def __init__(self):
-        self.is_busy = False
-        self.logs = []
-
-state = State()
-
-def add_log(msg):
-    ts = datetime.datetime.now().strftime("%H:%M:%S")
-    state.logs.append(f"[{ts}] {msg}")
-    if len(state.logs) > 100:
-        state.logs.pop(0)
-
 class GenerateRequest(BaseModel):
     start_date: str
     days: int
@@ -46,7 +33,7 @@ class GenerateRequest(BaseModel):
 def get_status():
     return {
         "status": "online",
-        "is_busy": state.is_busy,
+        "is_busy": engine.is_busy,
         "database": "Connected" if db.conn else "Error",
         "music_root_exists": os.path.exists(config.get_path('MUSIC_ROOT')),
         "timestamp": datetime.datetime.now().isoformat()
@@ -81,11 +68,11 @@ def update_config(new_config: dict):
 
 @app.get("/logs")
 def get_logs():
-    return {"logs": state.logs, "is_busy": state.is_busy}
+    return {"logs": engine.logs, "is_busy": engine.is_busy}
 
 @app.get("/stats")
 def get_stats():
-    if state.is_busy:
+    if engine.is_busy:
         return {"categories": [], "top_artists": []}
     return db.get_stats()
 
