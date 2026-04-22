@@ -156,7 +156,6 @@ class PlaylistEngine:
         return 0
 
     def get_audio_duration(self, filepath):
-        try:
             from mutagen import File as MutagenFile
             audio = MutagenFile(filepath)
             if audio and audio.info:
@@ -263,9 +262,13 @@ class PlaylistEngine:
                         cat = 'SERTANEJO C'
 
                     # Seleção inteligente (BPM + Histórico)
-                    file_path, duration = self.select_music("", cat, int(current_block_time[:2]))
+                    file_path, duration, tid = self.select_music("", cat, int(current_block_time[:2]))
                     
                     if file_path:
+                        # CARIMBA A EXECUÇÃO NO BANCO!
+                        exec_time = f"{date_str} {current_block_time}:00"
+                        db.update_last_played(tid, exec_time)
+                        
                         # Se for vinheta ou intercom, usamos parâmetros diferentes ou duração zero
                         is_special = any(x in cat for x in ['VHT', 'CHAMADA', 'INTERCOM', 'AMOSTRA'])
                         m_val = "0" if is_special else "3000"

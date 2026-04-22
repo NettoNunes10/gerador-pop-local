@@ -88,8 +88,12 @@ class DatabaseManager:
         self.conn.execute('INSERT INTO historico_execucao (caminho_arquivo, data_hora, dia_semana) VALUES (?, ?, ?)', (filepath, now, now.weekday()))
         self.conn.commit()
 
-    def update_weight(self, track_id, weight):
-        self.conn.execute("UPDATE biblioteca SET peso_especifico = ? WHERE id = ?", (weight, track_id))
+    def update_last_played(self, track_id, timestamp):
+        """Marca a data e hora em que a música foi agendada/tocada."""
+        self.conn.execute(
+            "UPDATE biblioteca SET data_ultima_execucao = ? WHERE id = ?",
+            (timestamp, track_id)
+        )
         self.conn.commit()
 
     def update_subcategory(self, track_id, subcat):
