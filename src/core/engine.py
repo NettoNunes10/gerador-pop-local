@@ -148,30 +148,32 @@ class PlaylistEngine:
                     if not row or row[0] == 0:
                         if analyze:
                             self.log(f"[{index+1}/{total}] Analisando: {f}...")
-                            info = analyzer.analyze(full_path)
-                            bpm = info['bpm']
-                            title = info['titulo']
-                            artista = info['artista']
+                            artists_list, title = self.parse_artist_title(f)
+                            artista = ", ".join(artists_list)
+                            bpm = analyzer.get_bpm(full_path)
+                            duracao = self.get_audio_duration(full_path)
                         else:
                             # Vinhetas/Comerciais: Sincronismo Instantâneo
-                            bpm = 0
-                            title = f
                             artista = category
+                            title = f
+                            bpm = 0
+                            duracao = self.get_audio_duration(full_path)
                         
                         ctime = os.path.getctime(full_path)
                         data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
                         subcat = row[1] if row else 'STD'
-                        novos.append((full_path, artista, title, category, bpm, subcat, data_arquivo))
+                        novos.append((full_path, artista, title, category, bpm, subcat, data_arquivo, duracao))
 
                         if len(novos) >= 20:
                             db.conn.executemany('''
-                                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo, duracao)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                 ON CONFLICT(caminho_arquivo) DO UPDATE SET
                                     artista=excluded.artista, nome_musica=excluded.nome_musica,
                                     pasta_categoria=excluded.pasta_categoria, bpm=excluded.bpm,
                                     sub_categoria=excluded.sub_categoria,
-                                    data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
+                                    data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo),
+                                    duracao=excluded.duracao
                             ''', novos)
                             db.conn.commit()
                             novos = []
@@ -184,13 +186,14 @@ class PlaylistEngine:
 
             if novos:
                 db.conn.executemany('''
-                    INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO biblioteca (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, sub_categoria, data_arquivo, duracao)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(caminho_arquivo) DO UPDATE SET
                         artista=excluded.artista, nome_musica=excluded.nome_musica,
                         pasta_categoria=excluded.pasta_categoria, bpm=excluded.bpm,
                         sub_categoria=excluded.sub_categoria,
-                        data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
+                        data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo),
+                        duracao=excluded.duracao
                 ''', novos)
                 db.conn.commit()
 
