@@ -17,7 +17,6 @@ class PlaylistEngine:
 
     def global_cleanup(self):
         """Remove do banco QUALQUER arquivo que não exista mais fisicamente."""
-        print("\n🧹 [FAXINA] Iniciando limpeza global de arquivos fantasmas...")
         self.log("🧹 Iniciando limpeza global de arquivos fantasmas...")
         try:
             cursor = db.conn.cursor()
@@ -32,23 +31,22 @@ class PlaylistEngine:
                 # SE a categoria for 'SERTANEJO B' e a pasta não existe, deleta sem perguntar
                 if category == 'SERTANEJO B' or not os.path.exists(clean_path):
                     ids_to_delete.append(row_id)
-                    if len(ids_to_delete) < 10: # Loga apenas os primeiros para não inundar
-                        print(f"🗑️  Removendo fantasma: {name} ({category})")
+                    if len(ids_to_delete) <= 20: # Loga os primeiros 20 no painel
+                        self.log(f"🗑️ Removendo fantasma: {name} [{category}]")
+                    elif len(ids_to_delete) == 21:
+                        self.log("... e muitos outros arquivos.")
             
             if ids_to_delete:
-                print(f"♻️  Removendo {len(ids_to_delete)} registros do banco de dados...")
+                self.log(f"♻️ Faxina: Removendo {len(ids_to_delete)} registros do banco de dados...")
                 for i in range(0, len(ids_to_delete), 100):
                     batch = ids_to_delete[i:i+100]
                     placeholders = ', '.join(['?'] * len(batch))
                     cursor.execute(f"DELETE FROM biblioteca WHERE id IN ({placeholders})", batch)
                 db.conn.commit()
-                print("✅ Faxina concluída!")
-                self.log(f"✅ Limpeza concluída: {len(ids_to_delete)} itens removidos.")
+                self.log(f"✅ Faxina concluída! {len(ids_to_delete)} itens removidos.")
             else:
-                print("✅ Nada para limpar.")
-                self.log("✅ A biblioteca já está limpa.")
+                self.log("✅ A biblioteca já está limpa. Nenhum fantasma encontrado.")
         except Exception as e:
-            print(f"❌ ERRO NA LIMPEZA: {e}")
             self.log(f"❌ Erro na limpeza global: {e}")
 
     def sync_all(self):
