@@ -15,35 +15,39 @@ class PlaylistEngine:
 
     def global_cleanup(self):
         """Remove do banco QUALQUER arquivo que não exista mais fisicamente."""
+        print("\n🧹 [FAXINA] Iniciando limpeza global de arquivos fantasmas...")
         self.log("🧹 Iniciando limpeza global de arquivos fantasmas...")
         try:
             cursor = db.conn.cursor()
-            cursor.execute("SELECT id, caminho_arquivo, nome_musica FROM biblioteca")
+            cursor.execute("SELECT id, caminho_arquivo, nome_musica, pasta_categoria FROM biblioteca")
             all_files = cursor.fetchall()
             
             ids_to_delete = []
-            for row_id, path, name in all_files:
+            for row_id, path, name, category in all_files:
                 # Normalização radical para Windows
                 clean_path = os.path.abspath(path.replace('/', '\\')).strip()
                 
-                if not os.path.exists(clean_path):
+                # SE a categoria for 'SERTANEJO B' e a pasta não existe, deleta sem perguntar
+                if category == 'SERTANEJO B' or not os.path.exists(clean_path):
                     ids_to_delete.append(row_id)
-                    # self.log(f"🗑️ Detectado fantasma: {name}")
+                    if len(ids_to_delete) < 10: # Loga apenas os primeiros para não inundar
+                        print(f"🗑️  Removendo fantasma: {name} ({category})")
             
             if ids_to_delete:
-                self.log(f"♻️ Removendo {len(ids_to_delete)} itens que não existem mais no disco...")
+                print(f"♻️  Removendo {len(ids_to_delete)} registros do banco de dados...")
                 for i in range(0, len(ids_to_delete), 100):
                     batch = ids_to_delete[i:i+100]
                     placeholders = ', '.join(['?'] * len(batch))
                     cursor.execute(f"DELETE FROM biblioteca WHERE id IN ({placeholders})", batch)
                 db.conn.commit()
-                self.log(f"✅ Limpeza concluída com sucesso.")
+                print("✅ Faxina concluída!")
+                self.log(f"✅ Limpeza concluída: {len(ids_to_delete)} itens removidos.")
             else:
-                self.log("✅ A biblioteca já está limpa. Nenhum arquivo fantasma encontrado.")
+                print("✅ Nada para limpar.")
+                self.log("✅ A biblioteca já está limpa.")
         except Exception as e:
+            print(f"❌ ERRO NA LIMPEZA: {e}")
             self.log(f"❌ Erro na limpeza global: {e}")
-            import traceback
-            print(traceback.format_exc())
 
     def sync_all(self):
         if self.state.is_busy: return
