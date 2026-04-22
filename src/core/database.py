@@ -131,8 +131,8 @@ class DatabaseManager:
             print(f"Erro ao inserir música: {e}")
 
     def add_to_library(self, filepath, artists, title, category, bpm, subcat='STD', data_arquivo=None, duracao=0):
-        """Mantém compatibilidade com chamadas antigas se existirem."""
-        self.insert_music(title, artists, filepath, category, bpm, duracao, subcat, data_arquivo)
+        """Mantém compatibilidade com chamadas antigas."""
+        self.insert_music(title, artists, filepath, category, bpm, duracao, sub_categoria=subcat, data_arquivo=data_arquivo)
 
     def log_execution(self, filepath):
         now = datetime.datetime.now()
@@ -150,7 +150,7 @@ class DatabaseManager:
         self.conn.execute("UPDATE biblioteca SET peso_especifico = ? WHERE id = ?", (weight, track_id))
         self.conn.commit()
 
-    def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_bpm=0, min_rest_hours=4):
+    def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_energy=0.5, min_rest_hours=4):
         cursor = self.conn.cursor()
         query = '''
             SELECT b.*, f.multiplicador,
@@ -174,7 +174,12 @@ class DatabaseManager:
         for cand in candidates:
             filepath = cand['caminho_arquivo']
             if not os.path.exists(filepath): continue
-            if last_bpm > 0 and last_bpm < 80 and cand['bpm'] > 0 and cand['bpm'] < 80: continue
+            
+            # FILTRO DE ENERGIA: Evita saltos bruscos (delta de 0.35)
+            energy_val = cand['energy'] if cand['energy'] is not None else 0.5
+            energy_diff = abs(energy_val - last_energy)
+            if energy_diff > 0.35: 
+                continue
 
             ultima_vez_str = cand['ultima_vez']
             if ultima_vez_str:
@@ -197,7 +202,13 @@ class DatabaseManager:
 
             weight = cand['peso_especifico'] or 1.0
             mult = cand['multiplicador'] or 1.0
-            score = minutes_since * weight * mult * dayparting_factor
+            
+            # Score Final agora considera a Positividade (Valence)
+            valence_val = cand['valence'] if cand['valence'] is not None else 0.5
+            valence_bonus = 1.0 + (valence_val * 0.2)
+            
+            score = minutes_since * weight * mult * dayparting_factor * valence_bonus
+            
             if score > best_score:
                 best_score = score
                 best_candidate = cand

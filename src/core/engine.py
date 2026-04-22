@@ -11,7 +11,7 @@ from .spotify import spotify_service
 class PlaylistEngine:
     def __init__(self, log_callback=None):
         self.last_sweeper = ""
-        self.last_bpm = 0
+        self.last_energy = 0.5
         self.log_callback = log_callback
         self.is_busy = False
         self.logs = []
@@ -152,7 +152,7 @@ class PlaylistEngine:
                             artists_list, title = self.parse_artist_title(f)
                             artista = ", ".join(artists_list)
                             
-                            # TENTA SPOTIFY (Prioridade 1)
+                            # TENTA SPOTIFY (Prioridade Única)
                             if config.get_path('spotify_client_id'):
                                 sp_id = spotify_service.search_track(artists_list[0], title)
                                 if sp_id:
@@ -162,8 +162,10 @@ class PlaylistEngine:
                                         valence = features['valence']
                                         danceability = features['danceability']
                                         self.log(f"✨ Spotify: E:{energy} | V:{valence}")
+                                else:
+                                    self.log(f"⚠️ Não encontrada no Spotify: {artista} - {title} (Valores padrão aplicados)")
                             
-                            bpm = analyzer.get_bpm(full_path)
+                            bpm = 0 # BPM não é mais usado na programação
                             duracao = self.get_audio_duration(full_path)
                         else:
                             # Vinhetas/Comerciais: Sincronismo Instantâneo
@@ -269,10 +271,10 @@ class PlaylistEngine:
                     return self.select_music("", rule['surprise'], current_hour)
 
         self.sync_folder_to_db(folder_path, category)
-        candidate = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_bpm=self.last_bpm)
+        candidate = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_energy=self.last_energy)
         if candidate:
             full_path = candidate['caminho_arquivo']
-            self.last_bpm = candidate['bpm'] or 0
+            self.last_energy = candidate['energy'] or 0.5
             db.log_execution(full_path)
             return full_path, self.get_audio_duration(full_path)
         return None, 0
