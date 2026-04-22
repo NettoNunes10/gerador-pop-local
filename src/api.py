@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Gerador POP API")
-engine = PlaylistEngine() # Criado aqui para estar disponível globalmente
+engine = PlaylistEngine() # Instância global única
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,7 +78,6 @@ def get_stats():
         return {"categories": [], "top_artists": []}
     return db.get_stats()
 
-
 @app.get("/stream/{track_id}")
 def stream_audio(track_id: int):
     cursor = db.conn.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (track_id,))
@@ -89,7 +88,6 @@ def stream_audio(track_id: int):
     source_path = row[0].replace('/', '\\')
     if not os.path.exists(source_path):
         raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
-
     return FileResponse(source_path)
 
 @app.get("/library")
@@ -102,7 +100,6 @@ def get_library(
     bpm: Optional[str] = None,
     sort: str = "artista"
 ):
-    # Construção dinâmica da query
     conditions = []
     params = []
     if search:
@@ -134,7 +131,6 @@ def get_library(
 
     count_row = db.conn.execute(f"SELECT COUNT(*) FROM biblioteca {where}", params).fetchone()
     total = count_row[0]
-
     offset = (page - 1) * limit
     rows = db.conn.execute(
         f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
@@ -156,32 +152,25 @@ def get_library(
 
 @app.put("/library/{track_id}")
 def update_track_metadata(track_id: int, data: dict = Body(...)):
-    """Atualiza metadados de uma faixa com lógica bidirecional peso<->grupo."""
     if "weight" in data:
         new_weight = float(data["weight"])
-        # Peso muda → recalcula o grupo automaticamente
         new_group = config.get_group_for_weight(new_weight)
         db.update_weight(track_id, new_weight)
         db.update_subcategory(track_id, new_group)
         return {"status": "updated", "new_weight": new_weight, "new_group": new_group}
-    
     if "sub_categoria" in data:
         new_group = data["sub_categoria"]
-        # Grupo muda → seta o peso base do grupo
         new_weight = config.get_base_weight_for_group(new_group)
         db.update_subcategory(track_id, new_group)
         db.update_weight(track_id, new_weight)
         return {"status": "updated", "new_group": new_group, "new_weight": new_weight}
-    
     return {"status": "no_change"}
 
 @app.post("/library/batch")
 def batch_update_library(data: dict = Body(...)):
-    """Atualiza peso/grupo em lote para uma lista de track_ids."""
     track_ids = data.get("track_ids", [])
     if not track_ids:
         raise HTTPException(status_code=400, detail="Nenhum track selecionado")
-    
     if "sub_categoria" in data:
         new_group = data["sub_categoria"]
         new_weight = config.get_base_weight_for_group(new_group)
@@ -189,49 +178,33 @@ def batch_update_library(data: dict = Body(...)):
             db.update_subcategory(tid, new_group)
             db.update_weight(tid, new_weight)
         return {"status": "updated", "count": len(track_ids), "new_group": new_group, "new_weight": new_weight}
-    
     return {"status": "no_change"}
 
-
-# --- Tasks de Segundo Plano (Thread Dedicada) ---
-
-import threading
+# --- Tasks de Segundo Plano ---
 
 def run_generation_task(start_date_str: str, days: int):
-    state.is_busy = True
-    state.logs = []
-    add_log(f"Iniciando geracao de {days} dia(s) a partir de {start_date_str}...")
     try:
-        engine = PlaylistEngine(log_callback=add_log)
+        engine.is_busy = True
+        engine.logs = []
+        engine.log(f"Iniciando geracao de {days} dia(s) a partir de {start_date_str}...")
         start_date = datetime.datetime.strptime(start_date_str, '%Y%m%d').date()
         for i in range(days):
             current_date = start_date + datetime.timedelta(days=i)
             current_date_str = current_date.strftime('%Y%m%d')
-            add_log(f"--- Processando Dia {i+1}/{days}: {current_date_str} ---")
+            engine.log(f"--- Processando Dia {i+1}/{days}: {current_date_str} ---")
             engine.generate_schedule(current_date_str)
-        add_log("Geracao concluida com sucesso!")
+        engine.log("Geracao concluida com sucesso!")
     except Exception as e:
-        add_log(f"Erro critico na geracao: {str(e)}")
+        engine.log(f"Erro critico na geracao: {str(e)}")
         logger.exception("Falha na geracao")
     finally:
-        state.is_busy = False
+        engine.is_busy = False
 
 def run_sync_task():
-    state.is_busy = True
-    state.logs = []
-    add_log("Iniciando Sincronizacao Geral da Biblioteca...")
-    try:
-        engine = PlaylistEngine(log_callback=add_log)
-        music_root = config.get_path('MUSIC_ROOT')
-        if not os.path.exists(music_root):
-            add_log(f"Erro: Raiz de musicas nao encontrada em {music_root}")
-            return
-        
-        # Filtra pastas de sistema e ocultas (começam com $)
     try:
         engine.sync_all()
     except Exception as e:
-        print(f"Erro no sync task: {e}")
+        print(f"❌ Erro no sync_task: {e}")
 
 @app.post("/generate")
 async def start_generation(req: GenerateRequest):
@@ -251,22 +224,9 @@ async def start_sync():
 
 @app.middleware("http")
 async def log_requests(request, call_next):
-    # Print no terminal para cada request (ajuda a saber se o backend travou)
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {request.method} {request.url.path}")
     return await call_next(request)
 
-# --- Watchdog (Printa status no terminal a cada 30s) ---
-def watchdog():
-    import time
-    while True:
-        try:
-            print(f"--- HEARTBEAT: Servidor Ativo | Busy: {state.is_busy} | Logs: {len(state.logs)} ---")
-        except: pass
-        time.sleep(30)
-
-threading.Thread(target=watchdog, daemon=True).start()
-
 if __name__ == "__main__":
     import uvicorn
-    # Passando o objeto app diretamente para evitar erros de importação
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
