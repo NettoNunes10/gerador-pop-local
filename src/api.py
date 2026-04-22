@@ -17,6 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Gerador POP API")
+engine = PlaylistEngine() # Criado aqui para estar disponível globalmente
 
 app.add_middleware(
     CORSMiddleware,
