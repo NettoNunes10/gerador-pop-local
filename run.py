@@ -22,7 +22,7 @@ def run_app():
     print("  [1/3] Iniciando servidor de áudio (Porta 8001)...")
     music_root = "M:/" # Conforme definido no config
     audio_proc = subprocess.Popen(
-        ["npx", "http-server", music_root, "-p", "8001", "--cors", "-c-1"],
+        ["npx", "-y", "http-server", music_root, "-p", "8001", "--cors", "-c-1"],
         cwd=os.getcwd(),
         shell=True
     )
