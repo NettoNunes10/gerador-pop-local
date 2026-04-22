@@ -51,6 +51,13 @@ class PlaylistEngine:
             # 2. Sincroniza pastas configuradas
             self.log("📡 Iniciando sincronização de pastas...")
             for category, folder in config.paths.items():
+                self.sync_folder_to_db(folder, category)
+            
+            self.log("✅ Sincronização concluída com sucesso!")
+        except Exception as e:
+            self.log(f"❌ Erro crítico na sincronização: {e}")
+        finally:
+            self.state.is_busy = False
 
     def log(self, message):
         if self.log_callback:
