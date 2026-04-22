@@ -227,21 +227,14 @@ def run_sync_task():
             return
         
         # Filtra pastas de sistema e ocultas (começam com $)
-        categories = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d)) and not d.startswith('$')]
-        
-        for cat in categories:
-            folder_path = os.path.join(music_root, cat)
-            engine.sync_folder_to_db(folder_path, cat)
-        add_log("Sincronizacao concluida!")
+    try:
+        engine.sync_all()
     except Exception as e:
-        add_log(f"Erro na sincronizacao: {str(e)}")
-        logger.exception("Falha no sync")
-    finally:
-        state.is_busy = False
+        print(f"Erro no sync task: {e}")
 
 @app.post("/generate")
 async def start_generation(req: GenerateRequest):
-    if state.is_busy:
+    if engine.is_busy:
         raise HTTPException(status_code=400, detail="O sistema está ocupado.")
     t = threading.Thread(target=run_generation_task, args=(req.start_date, req.days), daemon=True)
     t.start()
@@ -249,7 +242,7 @@ async def start_generation(req: GenerateRequest):
 
 @app.post("/sync")
 async def start_sync():
-    if state.is_busy:
+    if engine.is_busy:
         raise HTTPException(status_code=400, detail="O sistema está ocupado.")
     t = threading.Thread(target=run_sync_task, daemon=True)
     t.start()
