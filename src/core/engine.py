@@ -6,6 +6,7 @@ from .config import config
 from .models import PaidInsertion
 from .database import db
 from .analyzer import analyzer
+from .spotify import spotify_service
 
 class PlaylistEngine:
     def __init__(self, log_callback=None):
@@ -144,10 +145,24 @@ class PlaylistEngine:
 
                     # Só analisa se for novo ou sem BPM
                     if not row or row[0] == 0:
+                        energy, valence, danceability, sp_id = 0.5, 0.5, 0.5, None
+                        
                         if analyze:
                             self.log(f"[{index+1}/{total}] Analisando: {f}...")
                             artists_list, title = self.parse_artist_title(f)
                             artista = ", ".join(artists_list)
+                            
+                            # TENTA SPOTIFY (Prioridade 1)
+                            if config.get_path('spotify_client_id'):
+                                sp_id = spotify_service.search_track(artists_list[0], title)
+                                if sp_id:
+                                    features = spotify_service.get_audio_features(sp_id)
+                                    if features:
+                                        energy = features['energy']
+                                        valence = features['valence']
+                                        danceability = features['danceability']
+                                        self.log(f"✨ Spotify: E:{energy} | V:{valence}")
+                            
                             bpm = analyzer.get_bpm(full_path)
                             duracao = self.get_audio_duration(full_path)
                         else:
@@ -161,7 +176,7 @@ class PlaylistEngine:
                         data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
                         subcat = row[1] if row else 'STD'
                         
-                        # GRAVAÇÃO IMEDIATA: Mais seguro e feedback em tempo real
+                        # GRAVAÇÃO IMEDIATA: Incluindo dados do Spotify
                         db.insert_music(
                             nome_musica=title,
                             artista=artista,
@@ -169,6 +184,10 @@ class PlaylistEngine:
                             pasta_categoria=category,
                             bpm=bpm,
                             duracao=duracao,
+                            energy=energy,
+                            valence=valence,
+                            danceability=danceability,
+                            spotify_id=sp_id,
                             sub_categoria=subcat,
                             data_arquivo=data_arquivo
                         )

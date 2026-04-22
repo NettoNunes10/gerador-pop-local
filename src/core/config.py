@@ -21,7 +21,9 @@ class ConfigManager:
             'SAMPLES': 'U:/Materiais/Eventos Gerais/Amostra Musical',
             'TEMPLATES': 'U:/Materiais/Roteiros/Modelos',
             'OUTPUT': 'U:/Materiais/Roteiros',
-            'FIXED_PREFIX': 'U:/Materiais/Eventos Gerais/Prefixo/PREFIXO POP FM.mp3'
+            'FIXED_PREFIX': 'U:/Materiais/Eventos Gerais/Prefixo/PREFIXO POP FM.mp3',
+            'spotify_client_id': '',
+            'spotify_client_secret': ''
         }
         self.favorite_artists = set()
         self.paid_rules = []
