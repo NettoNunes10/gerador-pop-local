@@ -90,6 +90,19 @@ def get_stats():
     return db.get_stats()
 
 
+@app.get("/stream/{track_id}")
+def stream_audio(track_id: int):
+    cursor = db.conn.execute("SELECT caminho_arquivo FROM biblioteca WHERE id = ?", (track_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Música não encontrada")
+    
+    source_path = row[0].replace('/', '\\')
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
+
+    return FileResponse(source_path)
+
 @app.get("/library")
 def get_library(
     page: int = 1,
@@ -100,14 +113,9 @@ def get_library(
     bpm: Optional[str] = None,
     sort: str = "artista"
 ):
-    # Base URL para o servidor de áudio dedicado
-    AUDIO_SERVER_URL = "http://127.0.0.1:8001"
-    music_root = config.get_path('MUSIC_ROOT')
-
-    # Construção dinâmica da query com filtros
+    # Construção dinâmica da query
     conditions = []
     params = []
-
     if search:
         conditions.append("(LOWER(artista) LIKE ? OR LOWER(nome_musica) LIKE ?)")
         term = f"%{search.lower()}%"
@@ -126,8 +134,6 @@ def get_library(
         conditions.append("bpm > 120")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
-    # Mapeamento de colunas para ordenação
     sort_map = {
         "artista": "artista ASC",
         "nome": "nome_musica ASC",
@@ -137,48 +143,23 @@ def get_library(
     }
     order = sort_map.get(sort, "artista ASC")
 
-    # Total de registros (para paginação)
     count_row = db.conn.execute(f"SELECT COUNT(*) FROM biblioteca {where}", params).fetchone()
     total = count_row[0]
 
-    # Registros da página
     offset = (page - 1) * limit
     rows = db.conn.execute(
-        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo, caminho_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
+        f"SELECT id, nome_musica, artista, pasta_categoria, bpm, peso_especifico, sub_categoria, data_arquivo FROM biblioteca {where} ORDER BY {order} LIMIT ? OFFSET ?",
         params + [limit, offset]
     ).fetchall()
 
-    items = []
-    for r in rows:
-        audio_url = None
-        try:
-            full_path = r[8]
-            # Normalização para evitar problemas de M:/ vs m:/
-            m_root = music_root.lower().replace('\\', '/')
-            f_path = full_path.lower().replace('\\', '/')
-            
-            if f_path.startswith(m_root):
-                rel_path = full_path[len(music_root):].lstrip('\\/')
-                encoded_rel = urllib.parse.quote(rel_path.replace('\\', '/'), safe='/')
-                audio_url = f"{AUDIO_SERVER_URL}/{encoded_rel}"
-            else:
-                # Se não começar com o root, tenta pegar o que vem depois da letra do drive
-                if ":/" in f_path or ":\\" in f_path:
-                    rel_path = f_path.split(":", 1)[1].lstrip('\\/')
-                    encoded_rel = urllib.parse.quote(rel_path, safe='/')
-                    audio_url = f"{AUDIO_SERVER_URL}/{encoded_rel}"
-        except Exception as e:
-            print(f"⚠️ Erro ao gerar URL para {r[1]}: {e}")
-
-        items.append({
-            "id": r[0], "nome": r[1], "artista": r[2],
-            "categoria": r[3], "bpm": r[4], "peso": r[5],
-            "sub_categoria": r[6], "data_arquivo": r[7],
-            "audio_url": audio_url
-        })
-
     return {
-        "items": items,
+        "items": [
+            {
+                "id": r[0], "nome": r[1], "artista": r[2],
+                "categoria": r[3], "bpm": r[4], "peso": r[5],
+                "sub_categoria": r[6], "data_arquivo": r[7]
+            } for r in rows
+        ],
         "total": total,
         "page": page,
         "pages": max(1, -(-total // limit))

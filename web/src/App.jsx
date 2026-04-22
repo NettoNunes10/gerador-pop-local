@@ -254,17 +254,26 @@ function App() {
     setCurrentTrack(track)
     setIsPlayerLoading(true)
     
-    // Agora usamos a URL do servidor de áudio dedicado (Porta 8001)
-    if (audioRef.current && track.audio_url) {
-      audioRef.current.src = track.audio_url
-      audioRef.current.load()
-      audioRef.current.play()
-        .then(() => setIsPlayerLoading(false))
-        .catch(e => {
-          console.error("Erro ao dar play:", e)
-          setIsPlayerLoading(false)
-        })
-    }
+    // Voltamos para o método de carregar o áudio completo antes de tocar
+    // É mais lento, mas é o que funcionava de forma estável para você
+    fetch(`${API_URL}/stream/${track.id}`)
+      .then(response => response.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob)
+        if (audioRef.current) {
+          audioRef.current.src = url
+          audioRef.current.play()
+            .then(() => setIsPlayerLoading(false))
+            .catch(e => {
+              console.error("Erro ao dar play:", e)
+              setIsPlayerLoading(false)
+            })
+        }
+      })
+      .catch(err => {
+        console.error("Erro ao carregar áudio:", err)
+        setIsPlayerLoading(false)
+      })
   }
 
   const handleUpdateMetadata = async (trackId, field, value) => {

@@ -18,33 +18,23 @@ def run_app():
         print("   Certifique-se de que não há outra instância do gerador rodando.")
         return
 
-    # 1. Iniciar o Servidor de Áudio (Dedicado para M:/)
-    print("  [1/3] Iniciando servidor de áudio (Porta 8001)...")
-    music_root = "M:/" # Conforme definido no config
-    audio_proc = subprocess.Popen(
-        ["npx", "-y", "http-server", music_root, "-p", "8001", "--cors", "-c-1"],
-        cwd=os.getcwd(),
-        shell=True
-    )
-
-    # 2. Iniciar o Backend (FastAPI)
-    print("  [2/3] Iniciando backend na porta 8000...")
+    # 1. Iniciar o Backend (FastAPI) em um processo separado
+    print("  [1/2] Iniciando backend na porta 8000...")
     backend_proc = subprocess.Popen(
         [sys.executable, "-m", "src.api"],
         cwd=os.getcwd()
     )
 
-    # 3. Iniciar o Frontend (Vite)
-    print("  [3/3] Iniciando interface web...")
+    # 2. Iniciar o Frontend (Vite)
+    print("  [2/2] Iniciando interface web...")
     frontend_proc = subprocess.Popen(
         ["npm", "run", "dev", "--", "--host", "127.0.0.1"],
         cwd=os.path.join(os.getcwd(), "web"),
         shell=True
     )
 
-    print("\n✅ Ecossistema Online!")
+    print("\n✅ Ambiente pronto!")
     print("🔗 Backend:   http://127.0.0.1:8000")
-    print("🔗 Áudio:     http://127.0.0.1:8001")
     print("🔗 Interface: http://127.0.0.1:5173")
     
     time.sleep(3)
