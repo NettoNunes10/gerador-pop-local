@@ -1,4 +1,4 @@
-import sqlite3
+﻿import sqlite3
 import datetime
 import os
 import threading
@@ -16,21 +16,32 @@ class DatabaseManager:
         self.migrate_vibe_scores()
         self.sync_favorites(list(config.favorite_artists))
 
+    def clear_file_exists_cache(self):
+        self._local.file_exists_cache = {}
+
+    def _file_exists(self, filepath):
+        cache = getattr(self._local, 'file_exists_cache', None)
+        if cache is None:
+            return os.path.exists(filepath)
+        if filepath not in cache:
+            cache[filepath] = os.path.exists(filepath)
+        return cache[filepath]
+
     def _get_conn(self):
         if not hasattr(self._local, 'conn') or self._local.conn is None:
             try:
                 conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
                 conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")   
+                conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=OFF")
-                
-                # Função customizada para busca sem acentos
+
+                # FunÃ§Ã£o customizada para busca sem acentos
                 def remove_accents(s):
                     if not s: return ""
                     return "".join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c))
-                
+
                 conn.create_function("unaccent", 1, remove_accents)
-                
+
                 self._local.conn = conn
             except Exception as e:
                 print(f"CRITICAL DB ERROR: {e}")
@@ -40,7 +51,7 @@ class DatabaseManager:
     @property
     def conn(self):
         c = self._get_conn()
-        if c is None: raise Exception("Banco de dados inacessível")
+        if c is None: raise Exception("Banco de dados inacessÃ­vel")
         return c
 
     def _create_tables(self, conn):
@@ -63,7 +74,7 @@ class DatabaseManager:
                 data_ultima_execucao TEXT
             )
         ''')
-        # Migrações silenciosas — adicionar colunas que podem não existir em DBs antigos
+        # MigraÃ§Ãµes silenciosas â€” adicionar colunas que podem nÃ£o existir em DBs antigos
         cols = [
             "sub_categoria TEXT",
             "data_arquivo TEXT",
@@ -79,13 +90,17 @@ class DatabaseManager:
 
         cursor.execute('CREATE TABLE IF NOT EXISTS artistas_favoritos (nome_artista TEXT PRIMARY KEY, multiplicador REAL DEFAULT 1.5)')
         cursor.execute('CREATE TABLE IF NOT EXISTS historico_execucao (id INTEGER PRIMARY KEY AUTOINCREMENT, caminho_arquivo TEXT, data_hora TIMESTAMP, dia_semana INTEGER)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_biblioteca_categoria_grupo_vibe ON biblioteca (pasta_categoria, sub_categoria, vibe)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_biblioteca_caminho ON biblioteca (caminho_arquivo)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_historico_caminho_data ON historico_execucao (caminho_arquivo, data_hora)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_historico_data ON historico_execucao (data_hora)')
         conn.commit()
 
     def insert_music(self, nome_musica, artista, caminho_arquivo, pasta_categoria, bpm, duracao, energy=None, valence=None, vibe=None, sub_categoria='STD', data_arquivo=None):
         try:
             self.conn.execute('''
                 INSERT INTO biblioteca (
-                    caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, duracao, 
+                    caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, duracao,
                     energy, valence, vibe, sub_categoria, data_arquivo
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -94,26 +109,26 @@ class DatabaseManager:
                     nome_musica=excluded.nome_musica,
                     pasta_categoria=excluded.pasta_categoria,
                     bpm=CASE WHEN excluded.bpm > 0 THEN excluded.bpm ELSE biblioteca.bpm END,
-                    duracao=excluded.duracao,
+                    duracao=CASE WHEN excluded.duracao > 0 THEN excluded.duracao ELSE biblioteca.duracao END,
                     energy=CASE WHEN excluded.energy > 0.5 THEN excluded.energy ELSE biblioteca.energy END,
                     valence=CASE WHEN excluded.valence > 0.5 THEN excluded.valence ELSE biblioteca.valence END,
                     vibe=CASE WHEN excluded.vibe > 0 THEN excluded.vibe ELSE biblioteca.vibe END,
                     sub_categoria=excluded.sub_categoria,
                     data_arquivo=COALESCE(data_arquivo, excluded.data_arquivo)
-            ''', (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, duracao, 
+            ''', (caminho_arquivo, artista, nome_musica, pasta_categoria, bpm, duracao,
                   energy, valence, vibe, sub_categoria, data_arquivo))
             self.conn.commit()
         except Exception as e:
-            print(f"Erro ao inserir música: {e}")
+            print(f"Erro ao inserir mÃºsica: {e}")
 
     def log_execution(self, filepath, scheduled_time=None):
-        """Registra a execução de um arquivo. Usa scheduled_time (datetime do bloco) se fornecido."""
+        """Registra a execuÃ§Ã£o de um arquivo. Usa scheduled_time (datetime do bloco) se fornecido."""
         ts = scheduled_time or datetime.datetime.now()
         self.conn.execute('INSERT INTO historico_execucao (caminho_arquivo, data_hora, dia_semana) VALUES (?, ?, ?)', (filepath, ts, ts.weekday()))
         self.conn.commit()
 
     def update_last_played(self, track_id, timestamp):
-        """Marca a data e hora em que a música foi agendada/tocada."""
+        """Marca a data e hora em que a mÃºsica foi agendada/tocada."""
         self.conn.execute(
             "UPDATE biblioteca SET data_ultima_execucao = ? WHERE id = ?",
             (timestamp, track_id)
@@ -121,43 +136,43 @@ class DatabaseManager:
         self.conn.commit()
 
     def reset_all_history(self):
-        """Semeia um passado falso proporcional ao peso de cada música (Big Bang)."""
+        """Semeia um passado falso proporcional ao peso de cada mÃºsica (Big Bang)."""
         now = datetime.datetime.now()
-        
-        # 1. Limpa o histórico antigo
+
+        # 1. Limpa o histÃ³rico antigo
         self.conn.execute("DELETE FROM historico_execucao")
-        
-        # 2. Busca todas as músicas e distribui timestamps falsos
+
+        # 2. Busca todas as mÃºsicas e distribui timestamps falsos
         cursor = self.conn.cursor()
         cursor.execute("SELECT id, peso_especifico FROM biblioteca")
         tracks = cursor.fetchall()
-        
+
         for track in tracks:
             track_id = track['id']
             weight = track['peso_especifico'] or 1.0
-            
+
             if weight >= 2.5:
-                # TOP: tocou entre 2 e 16 horas atrás
+                # TOP: tocou entre 2 e 16 horas atrÃ¡s
                 hours_ago = random.uniform(2, 16)
             elif weight >= 1.0:
-                # NORMAL: tocou entre 10 e 72 horas atrás
+                # NORMAL: tocou entre 10 e 72 horas atrÃ¡s
                 hours_ago = random.uniform(10, 72)
             else:
-                # LIGHT: tocou entre 1 e 40 dias atrás
+                # LIGHT: tocou entre 1 e 40 dias atrÃ¡s
                 hours_ago = random.uniform(24, 24 * 40)
-            
+
             fake_time = now - datetime.timedelta(hours=hours_ago)
             self.conn.execute(
                 "UPDATE biblioteca SET data_ultima_execucao = ? WHERE id = ?",
                 (fake_time.isoformat(), track_id)
             )
-            # Insere também no histórico para que get_recent_artists/tracks funcione
+            # Insere tambÃ©m no histÃ³rico para que get_recent_artists/tracks funcione
             self.conn.execute(
                 'INSERT INTO historico_execucao (caminho_arquivo, data_hora, dia_semana) '
                 'SELECT caminho_arquivo, ?, ? FROM biblioteca WHERE id = ?',
                 (fake_time, fake_time.weekday(), track_id)
             )
-        
+
         self.conn.commit()
 
     def update_subcategory(self, track_id, subcat):
@@ -169,46 +184,46 @@ class DatabaseManager:
         self.conn.commit()
 
     def update_enrichment(self, track_id, data):
-        """Atualiza campos de inteligência musical."""
+        """Atualiza campos de inteligÃªncia musical."""
         self.conn.execute('''
-            UPDATE biblioteca SET 
-                bpm = ?, 
-                energy = ?, 
-                valence = ?, 
-                vibe = ? 
+            UPDATE biblioteca SET
+                bpm = ?,
+                energy = ?,
+                valence = ?,
+                vibe = ?
             WHERE id = ?
         ''', (data.get('bpm', 0), data.get('energy', 0), data.get('valence', 0), data.get('vibe', 50), track_id))
         self.conn.commit()
 
     def migrate_vibe_scores(self):
-        """Atualiza vibe de 1-4 para a média (energy + valence) / 2."""
+        """Atualiza vibe de 1-4 para a mÃ©dia (energy + valence) / 2."""
         try:
             # Procura itens onde vibe < 5 e energy/valence existem
             self.conn.execute("""
-                UPDATE biblioteca 
+                UPDATE biblioteca
                 SET vibe = CAST((energy + valence) / 2 AS INTEGER)
                 WHERE (vibe < 5 OR vibe IS NULL) AND energy > 0 AND valence > 0
             """)
             self.conn.commit()
         except Exception as e:
-            print(f"❌ Erro na migração de vibe: {e}")
+            print(f"âŒ Erro na migraÃ§Ã£o de vibe: {e}")
 
     def get_recent_artists(self, limit=10):
         """Retorna um conjunto de nomes de artistas que tocaram recentemente."""
         if limit <= 0: return set()
         cursor = self.conn.cursor()
         cursor.execute('''
-            SELECT b.artista 
+            SELECT b.artista
             FROM historico_execucao h
             JOIN biblioteca b ON h.caminho_arquivo = b.caminho_arquivo
             ORDER BY h.id DESC
             LIMIT ?
         ''', (limit,))
-        
+
         recent = set()
         for row in cursor.fetchall():
             if row[0]:
-                # Artistas são salvos como "ARTISTA 1, ARTISTA 2"
+                # Artistas sÃ£o salvos como "ARTISTA 1, ARTISTA 2"
                 parts = [a.strip().upper() for a in row[0].split(',')]
                 recent.update(parts)
         return recent
@@ -247,36 +262,33 @@ class DatabaseManager:
                 params.append(subcategory)
         query += " AND (b.vibe IS NULL OR (b.vibe >= ? AND b.vibe <= ?))"
         params.extend([vibe_min, vibe_max])
-        
+
         # Aleatoriedade via SQL e limite de busca para performance
         query += " ORDER BY RANDOM() LIMIT 500"
-        
+
         cursor.execute(query, params)
         candidates = cursor.fetchall()
-        if not candidates: return None, -1
+        if not candidates: return None, -1, False
 
         now = simulated_now or datetime.datetime.now()
         recent_artists = self.get_recent_artists(config.artist_separation)
         recent_tracks = self.get_recent_tracks(min_rest_slots)
-        
+
         return self._evaluate_candidates(candidates, now, recent_artists, recent_tracks, last_bpm, min_rest_hours)
 
     def _evaluate_candidates(self, candidates, now, recent_artists, recent_tracks, last_bpm, min_rest_hours):
         best_candidate = None
         best_score = -1.0
-        
+
         for cand in candidates:
             filepath = cand['caminho_arquivo']
-            if not os.path.exists(filepath): continue
-            
-            # FILTRO DE REPETIÇÃO POR SLOT (Espaços)
+            if not self._file_exists(filepath): continue
+
+            # FILTRO DE REPETIÃ‡ÃƒO POR SLOT (EspaÃ§os)
             if filepath in recent_tracks: continue
             cand_artists = [a.strip().upper() for a in (cand['artista'] or "").split(',')]
             is_recent = any(a in recent_artists for a in cand_artists)
-            
-            # FILTRO DE RITMO (BPM)
-            current_bpm = cand['bpm'] or 0
-            if last_bpm > 0 and last_bpm < 80 and current_bpm > 0 and current_bpm < 80:
+            if is_recent:
                 continue
 
             # FILTRO DE DESCANSO
@@ -287,27 +299,26 @@ class DatabaseManager:
                 if delta.total_seconds() < min_rest_hours * 3600: continue
                 minutes_since = delta.total_seconds() / 60
             else:
-                minutes_since = 14400 
+                minutes_since = 14400
 
             weight = cand['peso_especifico'] or 1.0
-            
-            # Cálculo de Multiplicador (Favoritos)
+
+            # CÃ¡lculo de Multiplicador (Favoritos)
             is_favorite = any(a in config.favorite_artists for a in cand_artists)
             mult = 1.5 if is_favorite else 1.0
-            
-            # Peso Exponencial (Peso ^ 2) para dar muito mais agressividade às músicas marcadas
+
+            # Peso Exponencial (Peso ^ 2) para dar muito mais agressividade Ã s mÃºsicas marcadas
             score = (minutes_since * (weight ** 2) * mult) + random.uniform(0, 10)
-            if is_recent: score *= 0.1 
 
             if score > best_score:
                 best_score = score
                 best_candidate = cand
-        
-        # PROTEÇÃO ANTI-COLISÃO: evita dois super hits colados
+
+        # PROTEÃ‡ÃƒO ANTI-COLISÃƒO: evita dois super hits colados
         if best_candidate:
             winner_weight = best_candidate['peso_especifico'] or 1.0
             if winner_weight >= 2.0:
-                # Verifica se alguma música com peso similar (±0.4) tocou recentemente
+                # Verifica se alguma mÃºsica com peso similar (Â±0.4) tocou recentemente
                 recent_heavy = False
                 cursor = self.conn.cursor()
                 cursor.execute('''
@@ -320,7 +331,7 @@ class DatabaseManager:
                     last_weight = last_row[0]
                     if abs(winner_weight - last_weight) <= 0.4 and last_weight >= 2.0:
                         recent_heavy = True
-                
+
                 if recent_heavy and random.random() < 0.5:
                     # 50% de chance: pula para a segunda colocada
                     second_best = None
@@ -328,41 +339,44 @@ class DatabaseManager:
                     for cand in candidates:
                         if cand['id'] == best_candidate['id']: continue
                         w = cand['peso_especifico'] or 1.0
-                        if w >= 2.0: continue  # Pula outros pesados também
+                        if w >= 2.0: continue  # Pula outros pesados tambÃ©m
                         filepath = cand['caminho_arquivo']
-                        if not os.path.exists(filepath): continue
+                        if not self._file_exists(filepath): continue
                         if filepath in recent_tracks: continue
-                        
+
                         cand_artists = [a.strip().upper() for a in (cand['artista'] or "").split(',')]
-                        
+                        is_recent_art = any(a in recent_artists for a in cand_artists)
+                        if is_recent_art:
+                            continue
+
                         ultima_vez_str = cand['ultima_vez']
                         if ultima_vez_str:
                             try:
                                 ultima_vez = datetime.datetime.fromisoformat(ultima_vez_str)
                                 delta = now - ultima_vez
+                                if delta.total_seconds() < min_rest_hours * 3600:
+                                    continue
                                 minutes_since = delta.total_seconds() / 60
                             except:
                                 minutes_since = 14400
                         else:
                             minutes_since = 14400
-                        
+
                         sc = (minutes_since * (w ** 2)) + random.uniform(0, 10)
-                        is_recent_art = any(a in recent_artists for a in cand_artists)
-                        if is_recent_art: sc *= 0.1
-                        
                         if sc > second_score:
                             second_score = sc
                             second_best = cand
-                    
+
                     if second_best:
                         best_candidate = second_best
                         best_score = second_score
-        
-        # Se não encontrou ninguém com os filtros, tenta ignorar o descanso (fallback)
+
+        # Se nÃ£o encontrou ninguÃ©m com os filtros, tenta ignorar o descanso (fallback)
         if not best_candidate and min_rest_hours > 0:
-            return self._evaluate_candidates(candidates, now, recent_artists, recent_tracks, last_bpm, 0)
-            
-        return best_candidate, best_score
+            fallback_candidate, fallback_score, _ = self._evaluate_candidates(candidates, now, recent_artists, recent_tracks, last_bpm, 0)
+            return fallback_candidate, fallback_score, bool(fallback_candidate)
+
+        return best_candidate, best_score, False
 
     def get_stats(self):
         stats = {}

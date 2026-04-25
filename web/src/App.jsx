@@ -3,7 +3,7 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip
 } from 'recharts'
-import { Play, BarChart2, Music, Layout, Database, RefreshCw, X, Search, Trash2, Plus, Save, AlertTriangle, FileText, Edit2, Copy, Settings, ClipboardList, BookOpen } from 'lucide-react'
+import { Play, Pause, ChevronDown, ChevronRight, BarChart2, Music, Layout, Database, RefreshCw, X, Search, Trash2, Plus, Save, AlertTriangle, FileText, Edit2, Copy, Settings, ClipboardList } from 'lucide-react'
 import { API_URL, safeFetch } from './api/client'
 import { AppHeader } from './components/AppHeader'
 import { BusyBanner } from './components/BusyBanner'
@@ -40,13 +40,17 @@ function App() {
     { name: 'OLD', min_weight: 0.0, base_weight: 0.5 },
   ])
   const [selectedTracks, setSelectedTracks] = useState(new Set())
-  const [filterGroup, setFilterGroup] = useState('')
+  const [filterGroups, setFilterGroups] = useState([])
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
-  const [bpm, setBpm] = useState('')
+  const [filterVibe, setFilterVibe] = useState('')
   const [sortBy, setSortBy] = useState('artista')
+  const [selectedTrackDetails, setSelectedTrackDetails] = useState(null)
+  const [editingTrackName, setEditingTrackName] = useState('')
+  const [duplicateGroups, setDuplicateGroups] = useState([])
+  const [showDuplicates, setShowDuplicates] = useState(false)
 
   // BLM Manager State
   const [selectedBLM, setSelectedBLM] = useState(null)
@@ -61,10 +65,12 @@ function App() {
   const [categories, setCategories] = useState([])
   const [blockClipboard, setBlockClipboard] = useState(null)
   const [draggedItem, setDraggedItem] = useState(null)
+  const [expandedBlmBlocks, setExpandedBlmBlocks] = useState(new Set())
 
   // Player State
   const [currentTrack, setCurrentTrack] = useState(null)
   const [isPlayerLoading, setIsPlayerLoading] = useState(false)
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false)
   const audioRef = useRef(null)
 
   // Config & App State
@@ -96,6 +102,7 @@ function App() {
       const data = await res.json()
       setSystemStatus(data)
       setIsBackendBusy(data.is_busy)
+      if (!data.is_busy) setIsBusy(false)
     } catch {
       setIsOffline(true)
     }
@@ -129,11 +136,11 @@ function App() {
       setFavoriteArtists(data.favorite_artists || [])
       setPaidRules(data.paid_rules || [])
       setDayTemplates(data.day_templates || {})
-      setCustomVars(data.custom_vars || [])
+      setCustomVars((data.custom_vars || []).map(cv => ({ ...cv, color: toHexColor(cv.color || '#333333') })))
       if (data.custom_vars) {
         data.custom_vars.forEach(cv => {
           const path = (cv.path || '').trim()
-          if (path && !path.match(/\.(mp3|wav|flac|m4a|mp4|m4v)\s*$/i)) {
+          if (path && !path.match(/\.(mp3|wav|flac|m4a|aac|mp4|m4v)\s*$/i)) {
             safeFetch(`${API_URL}/list_files?path=${encodeURIComponent(path)}`)
               .then(r => r.json())
               .then(files => {
@@ -147,7 +154,11 @@ function App() {
       if (data.default_category) setDefaultCategory(data.default_category)
       setDefaultVibeMin(Number(data.default_vibe_min ?? 0))
       setDefaultVibeMax(Number(data.default_vibe_max ?? 100))
-      if (data.type_colors) setTypeColors(data.type_colors)
+      if (data.type_colors) {
+        setTypeColors(Object.fromEntries(
+          Object.entries(data.type_colors).map(([type, color]) => [type, toHexColor(color, typeColors[type] || '#333333')])
+        ))
+      }
     } catch {
       setIsOffline(true)
     }
@@ -158,6 +169,12 @@ function App() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
+  const normalizeGroupFilter = (value) => {
+    if (Array.isArray(value)) return value.filter(Boolean)
+    if (typeof value === 'string') return value.split(',').map(v => v.trim()).filter(Boolean)
+    return []
+  }
+
   const fetchLibrary = async (opts = {}) => {
     setLibLoading(true)
     try {
@@ -166,8 +183,9 @@ function App() {
       params.set('limit', LIB_LIMIT)
       if (opts.search ?? searchTerm) params.set('search', opts.search ?? searchTerm)
       if (opts.category ?? filterCategory) params.set('category', opts.category ?? filterCategory)
-      if (opts.group ?? filterGroup) params.set('group', opts.group ?? filterGroup)
-      if (opts.bpm ?? bpm) params.set('bpm', opts.bpm ?? bpm)
+      const groups = normalizeGroupFilter(opts.groups ?? filterGroups)
+      if (groups?.length) params.set('group', groups.join(','))
+      if (opts.vibe ?? filterVibe) params.set('vibe', opts.vibe ?? filterVibe)
       if (opts.sort ?? sortBy) params.set('sort', opts.sort ?? sortBy)
       const res = await safeFetch(`${API_URL}/library?${params}`)
       const data = await res.json()
@@ -188,6 +206,18 @@ function App() {
       setStats(data)
     } catch {
       setStats({ categories: [], top_artists: [] })
+    }
+  }
+
+  const fetchDuplicates = async () => {
+    try {
+      const res = await safeFetch(`${API_URL}/library/duplicates`, { timeout: 5000 })
+      const data = await res.json()
+      setDuplicateGroups(data)
+      setShowDuplicates(true)
+    } catch {
+      setDuplicateGroups([])
+      setShowDuplicates(true)
     }
   }
 
@@ -213,6 +243,7 @@ function App() {
         const data2 = await res2.json()
         setSystemStatus(data2)
         setIsBackendBusy(data2.is_busy)
+        if (!data2.is_busy) setIsBusy(false)
 
         setIsOffline(false)
         failureCount = 0
@@ -240,12 +271,53 @@ function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLibrary({ page: 1 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterCategory, filterGroup, bpm, sortBy])
+  }, [filterCategory, filterGroups, filterVibe, sortBy])
+
+  useEffect(() => {
+    const saved = localStorage.getItem('popfm_library_filters')
+    if (!saved) return
+    try {
+      const data = JSON.parse(saved)
+      setFilterCategory(data.filterCategory || '')
+      setFilterGroups(normalizeGroupFilter(data.filterGroups || data.filterGroup))
+      setFilterVibe(data.filterVibe || '')
+      setSortBy(data.sortBy || 'artista')
+      setSearchTerm(data.searchTerm || '')
+    } catch {
+      localStorage.removeItem('popfm_library_filters')
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('popfm_library_filters', JSON.stringify({
+      searchTerm,
+      filterCategory,
+      filterGroups,
+      filterVibe,
+      sortBy
+    }))
+  }, [searchTerm, filterCategory, filterGroups, filterVibe, sortBy])
 
   useEffect(() => {
     const el = logContainerRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [logs])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const onPlay = () => setIsAudioPlaying(true)
+    const onPause = () => setIsAudioPlaying(false)
+    const onEnded = () => setIsAudioPlaying(false)
+    audio.addEventListener('play', onPlay)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('ended', onEnded)
+    return () => {
+      audio.removeEventListener('play', onPlay)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('ended', onEnded)
+    }
+  }, [currentTrack])
 
   const handleSync = async () => {
     setIsBusy(true)
@@ -321,29 +393,41 @@ function App() {
   }
 
   const playTrack = (track) => {
-    setCurrentTrack(track)
-    setIsPlayerLoading(true)
+    if (currentTrack?.id === track.id && audioRef.current) {
+      if (audioRef.current.paused) {
+        setIsPlayerLoading(true)
+        audioRef.current.play()
+          .then(() => {
+            setIsAudioPlaying(true)
+            setIsPlayerLoading(false)
+          })
+          .catch(e => {
+            console.error("Erro ao dar play:", e)
+            setIsPlayerLoading(false)
+          })
+      } else {
+        audioRef.current.pause()
+        setIsAudioPlaying(false)
+      }
+      return
+    }
 
-    // Voltamos para o método de carregar o áudio completo antes de tocar
-    // É mais lento, mas é o que funcionava de forma estável para você
-    fetch(`${API_URL}/stream/${track.id}`)
-      .then(response => response.blob())
-      .then(blob => {
-        const url = URL.createObjectURL(blob)
-        if (audioRef.current) {
-          audioRef.current.src = url
-          audioRef.current.play()
-            .then(() => setIsPlayerLoading(false))
-            .catch(e => {
-              console.error("Erro ao dar play:", e)
-              setIsPlayerLoading(false)
-            })
-        }
-      })
-      .catch(err => {
-        console.error("Erro ao carregar áudio:", err)
-        setIsPlayerLoading(false)
-      })
+    setCurrentTrack(track)
+    setIsAudioPlaying(false)
+    setIsPlayerLoading(true)
+    setTimeout(() => {
+      if (!audioRef.current) return
+      audioRef.current.src = `${API_URL}/stream/${track.id}`
+      audioRef.current.play()
+        .then(() => {
+          setIsAudioPlaying(true)
+          setIsPlayerLoading(false)
+        })
+        .catch(e => {
+          console.error("Erro ao dar play:", e)
+          setIsPlayerLoading(false)
+        })
+    }, 0)
   }
 
   const handleUpdateMetadata = async (trackId, field, value) => {
@@ -361,6 +445,34 @@ function App() {
         : t
       ))
     } catch (e) { console.error(e) }
+  }
+
+  const handleRenameTrack = async () => {
+    if (!selectedTrackDetails) return
+    const nextFilename = editingTrackName.trim()
+    const currentFilename = `${selectedTrackDetails.artista || ''} - ${selectedTrackDetails.nome || ''}`.trim()
+    if (!nextFilename || nextFilename === currentFilename) return
+    try {
+      const res = await fetch(`${API_URL}/library/${selectedTrackDetails.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: nextFilename })
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.detail || 'Erro ao renomear')
+      const updated = {
+        ...selectedTrackDetails,
+        artista: result.artista,
+        nome: result.nome,
+        caminho_arquivo: result.caminho_arquivo
+      }
+      setSelectedTrackDetails(updated)
+      setEditingTrackName(result.filename || `${updated.artista} - ${updated.nome}`)
+      setLibrary(library.map(t => t.id === updated.id ? { ...t, artista: updated.artista, nome: updated.nome, caminho_arquivo: updated.caminho_arquivo } : t))
+      showToast('Arquivo renomeado com sucesso!')
+    } catch (e) {
+      alert('Erro ao renomear: ' + e.message)
+    }
   }
 
   const handleBatchUpdate = async (newGroup, weight = null) => {
@@ -421,6 +533,7 @@ function App() {
           }
           setBlmContent(data)
           setBlmStats(data.stats || null)
+          setExpandedBlmBlocks(new Set())
           setShowEditor(true)
           // Mantém o busy por mais um pouco para o navegador "respirar" após o render
           setTimeout(() => setIsBusy(false), 800)
@@ -634,7 +747,7 @@ function App() {
     if (resource.match(/^\d{2}:\d{2}$/)) return 'MARKER'
 
     // Se for um arquivo físico que não bateu com nada
-    if (resTrim.match(/\.(mp3|wav|flac|m4a|mp4|m4v|blm)\s*$/i)) return 'INVALID'
+    if (resTrim.match(/\.(mp3|wav|flac|m4a|aac|mp4|m4v|blm)\s*$/i)) return 'INVALID'
 
     return 'CAMINHO'
   }
@@ -669,7 +782,7 @@ function App() {
           const name = newType.replace('OUTRO_', '')
           const cv = customVars.find(c => c.name === name)
           const path = (cv?.path || '').trim()
-          if (path && path.match(/\.(mp3|wav|flac|m4a|mp4|m4v)\s*$/i)) {
+          if (path && path.match(/\.(mp3|wav|flac|m4a|aac|mp4|m4v)\s*$/i)) {
             item.resource = path
           } else {
             item.resource = `${name}.apm`
@@ -738,6 +851,14 @@ function App() {
     setBlmContent({ ...blmContent, blocks: nextBlocks })
   }
 
+  const toggleBlmBlock = (blockKey) => {
+    setExpandedBlmBlocks(prev => {
+      const next = new Set(prev)
+      next.has(blockKey) ? next.delete(blockKey) : next.add(blockKey)
+      return next
+    })
+  }
+
   const handleCreateNewModel = () => {
     if (!newModelName) return alert("Digite um nome para o modelo")
 
@@ -771,6 +892,7 @@ function App() {
       blocks: newBlocks,
       orphan_lines: []
     })
+    setExpandedBlmBlocks(new Set())
     setBlmStats({
       total_lines: newBlocks.reduce((total, block) => total + block.items.length + 1, 0),
       music_slots: 0,
@@ -799,6 +921,66 @@ function App() {
     } else {
       setSelectedTracks(new Set(library.map(t => t.id)))
     }
+  }
+
+  const formatDuration = (seconds) => {
+    const total = Number(seconds || 0)
+    if (!total) return '--'
+    const minutes = Math.floor(total / 60)
+    const rest = Math.floor(total % 60).toString().padStart(2, '0')
+    return `${minutes}:${rest}`
+  }
+
+  const formatDateTime = (value) => {
+    if (!value) return '--'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString('pt-BR')
+  }
+
+  const getVibeInfo = (value) => {
+    const vibe = Number(value || 0)
+    if (vibe >= 70) return { label: '70+', color: '#00ffaa' }
+    if (vibe >= 60) return { label: '60->70', color: '#ffaa00' }
+    return { label: '60-', color: '#ff2d55' }
+  }
+
+  const toHexColor = (value, fallback = '#333333') => {
+    const raw = String(value || '').trim()
+    const hex = raw.match(/^#?([0-9a-f]{6})$/i)
+    if (hex) return `#${hex[1].toUpperCase()}`
+    const shortHex = raw.match(/^#?([0-9a-f]{3})$/i)
+    if (shortHex) {
+      return `#${shortHex[1].split('').map(ch => ch + ch).join('').toUpperCase()}`
+    }
+    const rgb = raw.match(/^rgba?\((\d{1,3}),\s*(\d{1,3}),\s*(\d{1,3})/i)
+    if (rgb) {
+      return `#${rgb.slice(1, 4).map(n => Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, '0')).join('').toUpperCase()}`
+    }
+    return fallback
+  }
+
+  const clearLibraryFilters = () => {
+    setSearchTerm('')
+    setFilterCategory('')
+    setFilterGroups([])
+    setFilterVibe('')
+    setSortBy('artista')
+    setShowDuplicates(false)
+  }
+
+  const toggleFilterGroup = (groupName) => {
+    setFilterGroups(prevValue => {
+      const prev = normalizeGroupFilter(prevValue)
+      return prev.includes(groupName)
+        ? prev.filter(name => name !== groupName)
+        : [...prev, groupName]
+    })
+  }
+
+  const openTrackDetails = (track) => {
+    setSelectedTrackDetails(track)
+    setEditingTrackName(`${track.artista || ''} - ${track.nome || ''}`.trim())
   }
 
   // Dados já filtrados/ordenados pelo backend — library é a página atual
@@ -830,6 +1012,72 @@ function App() {
 
   const updateDayTemplate = (dayIndex, filename) => {
     setDayTemplates({ ...dayTemplates, [dayIndex]: filename })
+  }
+
+  const renderTrackDetailsModal = () => {
+    if (!selectedTrackDetails) return null
+    const track = selectedTrackDetails
+    const vibeInfo = getVibeInfo(track.vibe)
+    return (
+      <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 1900, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+        <div className="glass card" style={{ width: 'min(720px, 100%)', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
+            <div style={{ flex: 1 }}>
+              <h2 className="card-title" style={{ marginBottom: '0.35rem' }}>{track.nome}</h2>
+              <div style={{ fontWeight: 800, opacity: 0.75 }}>{track.artista}</div>
+            </div>
+            <button onClick={() => setSelectedTrackDetails(null)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}><X size={22} /></button>
+          </div>
+
+          <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label>Nome completo do arquivo</label>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <input
+                  type="text"
+                  value={editingTrackName}
+                  placeholder="ARTISTA - MUSICA"
+                  onChange={e => setEditingTrackName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleRenameTrack() }}
+                />
+                <button className="secondary-btn" onClick={handleRenameTrack} style={{ whiteSpace: 'nowrap' }}>
+                  <Save size={16} /> Salvar
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', padding: '0.8rem 1rem', borderRadius: '12px', background: 'rgba(255,255,255,0.04)' }}>
+              <audio controls src={`${API_URL}/stream/${track.id}`} style={{ width: '100%', minWidth: 0 }} />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div><label>Pasta</label><strong>{track.categoria || '--'}</strong></div>
+            <div><label>Grupo</label><strong style={{ color: GROUP_COLORS[track.sub_categoria] || '#fff' }}>{track.sub_categoria || 'STD'}</strong></div>
+            <div><label>Peso</label><strong>{Number(track.peso || 0).toFixed(1)}</strong></div>
+            <div><label>Duração</label><strong>{formatDuration(track.duracao)}</strong></div>
+            <div><label>Vibe</label><strong style={{ color: vibeInfo.color }}>{Math.round(track.vibe) || 0}</strong></div>
+            <div><label>Energy</label><strong>{Number(track.energy || 0).toFixed(2)}</strong></div>
+            <div><label>Valence</label><strong>{Number(track.valence || 0).toFixed(2)}</strong></div>
+          </div>
+
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            <div>
+              <label>Importação</label>
+              <div style={{ opacity: 0.8 }}>{formatDateTime(track.data_arquivo)}</div>
+            </div>
+            <div>
+              <label>Última execução</label>
+              <div style={{ opacity: 0.8 }}>{formatDateTime(track.data_ultima_execucao)}</div>
+            </div>
+            <div>
+              <label>Caminho do arquivo</label>
+              <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem', opacity: 0.75, overflowWrap: 'anywhere' }}>{track.caminho_arquivo || '--'}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const renderDashboard = () => (
@@ -924,18 +1172,18 @@ function App() {
 
   const renderLibrary = () => (
     <div className="glass card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '1rem', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
         <h2 className="card-title" style={{ margin: 0 }}><Database size={20} /> Biblioteca ({libTotal.toLocaleString('pt-BR')} músicas)</h2>
 
-        <div style={{ display: 'flex', gap: '1rem', flex: 1, minWidth: '400px' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flex: '1 1 100%', width: '100%', order: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: '0 1 340px', minWidth: '240px' }}>
             <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
             <input
               type="text"
               placeholder="Buscar..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              style={{ padding: '0.6rem 1rem 0.6rem 2.5rem', fontSize: '0.85rem', width: '100%' }}
+              style={{ padding: '0.65rem 1rem 0.65rem 2.5rem', fontSize: '0.9rem', width: '100%' }}
             />
           </div>
           <select
@@ -949,37 +1197,47 @@ function App() {
             ))}
           </select>
           <select
-            value={bpm}
-            onChange={e => setBpm(e.target.value)}
+            value={filterVibe}
+            onChange={e => setFilterVibe(e.target.value)}
             style={{ padding: '0.6rem', width: '130px', fontSize: '0.85rem' }}
           >
-            <option value="">Ritmo (BPM)</option>
-            <option value="L">Lento (L)</option>
-            <option value="M">Médio (M)</option>
-            <option value="H">Rápido (H)</option>
+            <option value="">Vibe</option>
+            <option value="LOW">60-</option>
+            <option value="MID">60-&gt;70</option>
+            <option value="HIGH">70+</option>
           </select>
-          <select
-            value={filterGroup}
-            onChange={e => setFilterGroup(e.target.value)}
-            style={{ padding: '0.6rem', width: '110px', fontSize: '0.85rem' }}
-          >
-            <option value="">Grupo</option>
-            {rotationGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
-          </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', padding: '0.45rem 0.65rem', border: '1px solid var(--border-color)', borderRadius: '0.75rem', background: 'rgba(0,0,0,0.3)', minHeight: '42px' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 700, marginRight: '0.15rem' }}>Peso</span>
+            {rotationGroups.map(g => (
+              <label key={g.name} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', margin: 0, letterSpacing: 0, fontSize: '0.72rem', color: GROUP_COLORS[g.name] || '#fff', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={filterGroups.includes(g.name)}
+                  onChange={() => toggleFilterGroup(g.name)}
+                  style={{ width: '12px', height: '12px', margin: 0 }}
+                />
+                {g.name}
+              </label>
+            ))}
+          </div>
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}
-            style={{ padding: '0.6rem', width: '155px', fontSize: '0.85rem' }}
+            style={{ padding: '0.6rem', width: '165px', fontSize: '0.85rem' }}
           >
             <option value="artista">Artista (A→Z)</option>
             <option value="nome">Música (A→Z)</option>
             <option value="data_desc">Mais Recente</option>
             <option value="data_asc">Mais Antiga</option>
             <option value="peso_desc">Maior Peso</option>
+            <option value="peso_asc">Menor Peso</option>
+            <option value="vibe_desc">Maior Vibe</option>
+            <option value="duracao_desc">Mais Longa</option>
           </select>
+          <button className="secondary-btn" onClick={clearLibraryFilters} style={{ padding: '0.55rem 0.8rem', fontSize: '0.78rem', marginLeft: 'auto' }}>Limpar filtros</button>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', order: 1 }}>
           <button
             onClick={handleSync}
             className={`primary ${isBusy ? 'pulse' : ''}`}
@@ -993,6 +1251,35 @@ function App() {
       </div>
 
       {/* Barra de Ações em Lote */}
+      <div style={{ display: 'none' }}>
+        <button className="secondary-btn" onClick={() => applyLibraryPreset('recent')} style={{ padding: '0.45rem 0.8rem', fontSize: '0.78rem' }}>Recém adicionadas</button>
+        <button className="secondary-btn" onClick={() => applyLibraryPreset('priority')} style={{ padding: '0.45rem 0.8rem', fontSize: '0.78rem' }}>Candidatas TOP/HIT</button>
+        <button className="secondary-btn" onClick={() => applyLibraryPreset('old')} style={{ padding: '0.45rem 0.8rem', fontSize: '0.78rem' }}>Rebaixadas OLD</button>
+        <button className="secondary-btn" onClick={() => applyLibraryPreset('duplicates')} style={{ padding: '0.45rem 0.8rem', fontSize: '0.78rem' }}>Possíveis repetidas</button>
+        <button className="secondary-btn" onClick={clearLibraryFilters} style={{ padding: '0.45rem 0.8rem', fontSize: '0.78rem', marginLeft: 'auto' }}>Limpar filtros</button>
+      </div>
+
+      {showDuplicates && (
+        <div style={{ marginBottom: '1rem', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,170,0,0.35)', background: 'rgba(255,170,0,0.08)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', marginBottom: duplicateGroups.length ? '0.8rem' : 0 }}>
+            <strong style={{ color: '#ffaa00', fontSize: '0.9rem' }}>Possíveis repetidas</strong>
+            <button onClick={() => setShowDuplicates(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', opacity: 0.7 }}><X size={16} /></button>
+          </div>
+          {duplicateGroups.length === 0 ? (
+            <div style={{ fontSize: '0.85rem', opacity: 0.65 }}>Nenhuma duplicada exata encontrada por artista + nome.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.45rem', maxHeight: '180px', overflowY: 'auto' }}>
+              {duplicateGroups.map(group => (
+                <div key={`${group.artista}-${group.nome}`} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.85rem', padding: '0.45rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span><strong>{group.artista}</strong> - {group.nome}</span>
+                  <span style={{ color: '#ffaa00', fontWeight: 800 }}>{group.total}x</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {selectedTracks.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.8rem 1.2rem', marginBottom: '1rem', background: 'rgba(188,19,254,0.15)', borderRadius: '10px', border: '1px solid rgba(188,19,254,0.4)' }}>
           <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#bc13fe' }}>{selectedTracks.size} selecionadas</span>
@@ -1022,29 +1309,47 @@ function App() {
         <table className="lib-table" style={{ tableLayout: 'fixed' }}>
           <thead>
             <tr style={{ background: 'none' }}>
-              <th style={{ width: '40px', padding: '1rem' }}><input type="checkbox" onChange={toggleSelectAll} checked={selectedTracks.size === library.length && library.length > 0} /></th>
-              <th style={{ width: '55px', textAlign: 'left', padding: '1rem' }}>PLAY</th>
+              <th style={{ width: '105px', textAlign: 'center', padding: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+                  <input type="checkbox" onChange={toggleSelectAll} checked={selectedTracks.size === library.length && library.length > 0} style={{ width: '14px', height: '14px', flex: '0 0 auto' }} />
+                  <span>PLAY</span>
+                </div>
+              </th>
               <th style={{ width: '300px', textAlign: 'left', padding: '1rem' }}>ARTISTA</th>
               <th style={{ textAlign: 'left', padding: '1rem' }}>MÚSICA</th>
               <th style={{ width: '90px', textAlign: 'left', padding: '1rem' }}>PASTA</th>
+              <th style={{ width: '82px', textAlign: 'center', padding: '1rem' }}>TEMPO</th>
               <th style={{ width: '105px', textAlign: 'left', padding: '1rem' }}>GRUPO</th>
-              <th style={{ width: '70px', textAlign: 'left', padding: '1rem' }}>BPM</th>
               <th style={{ width: '75px', textAlign: 'left', padding: '1rem' }}>PESO</th>
-              <th style={{ width: '45px', textAlign: 'center', padding: '1rem' }}></th>
+              <th style={{ width: '78px', textAlign: 'left', padding: '1rem' }}>VIBE</th>
             </tr>
           </thead>
           <tbody>
-            {library.map((track) => (
-              <tr key={track.id} style={{ background: selectedTracks.has(track.id) ? 'rgba(188,19,254,0.08)' : undefined }}>
-                <td><input type="checkbox" checked={selectedTracks.has(track.id)} onChange={() => toggleTrackSelection(track.id)} /></td>
-                <td>
+            {library.map((track) => {
+              const vibeInfo = getVibeInfo(track.vibe)
+              const groupColor = GROUP_COLORS[track.sub_categoria] || '#666'
+              return (
+              <tr
+                key={track.id}
+                style={{
+                  background: selectedTracks.has(track.id) ? 'rgba(188,19,254,0.08)' : undefined,
+                  borderLeft: `4px solid ${groupColor}`
+                }}
+              >
+                <td style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}>
+                  <input type="checkbox" checked={selectedTracks.has(track.id)} onChange={() => toggleTrackSelection(track.id)} style={{ width: '14px', height: '14px' }} />
                   <button className="play-btn" onClick={() => playTrack(track)} disabled={isPlayerLoading}>
-                    {isPlayerLoading && currentTrack?.id === track.id ? <RefreshCw size={14} className="pulse" /> : <Play size={14} fill="currentColor" />}
+                    {isPlayerLoading && currentTrack?.id === track.id
+                      ? <RefreshCw size={14} className="pulse" />
+                      : currentTrack?.id === track.id && isAudioPlaying
+                        ? <Pause size={14} fill="currentColor" />
+                        : <Play size={14} fill="currentColor" />}
                   </button>
                 </td>
-                <td style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={track.artista}>{track.artista}</td>
-                <td style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={track.nome}>{track.nome}</td>
+                <td onClick={() => openTrackDetails(track)} style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }} title={track.artista}>{track.artista}</td>
+                <td onClick={() => openTrackDetails(track)} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }} title={track.nome}>{track.nome}</td>
                 <td style={{ fontSize: '0.75rem', opacity: 0.7 }}>{track.categoria}</td>
+                <td style={{ fontSize: '0.8rem', fontWeight: 700, opacity: 0.8, textAlign: 'center' }}>{formatDuration(track.duracao)}</td>
                 <td>
                   <select
                     value={track.sub_categoria || 'STD'}
@@ -1053,13 +1358,6 @@ function App() {
                   >
                     {rotationGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
                   </select>
-                </td>
-                <td style={{
-                  color: track.bpm > 120 ? '#ff2d55' : track.bpm < 80 ? '#00f2ff' : '#00ffaa',
-                  fontWeight: 800,
-                  fontSize: '0.85rem'
-                }}>
-                  {Math.round(track.bpm) || '--'}
                 </td>
                 <td>
                   <input
@@ -1072,17 +1370,13 @@ function App() {
                   />
                 </td>
                 <td>
-                  <button
-                    onClick={() => handleDeleteTrack(track)}
-                    style={{ background: 'none', border: 'none', color: '#ff4444', cursor: 'pointer', opacity: 0.5, transition: 'opacity 0.2s' }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                    onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <span style={{ color: vibeInfo.color, border: `1px solid ${vibeInfo.color}`, borderRadius: '999px', padding: '0.2rem 0.45rem', fontSize: '0.72rem', fontWeight: 800 }}>
+                    {Math.round(track.vibe) || 0}
+                  </span>
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
         {library.length === 0 && !libLoading && (
@@ -1236,9 +1530,16 @@ function App() {
           {Object.entries(typeColors).map(([type, color]) => (
             <div key={type} className="input-group">
               <label>{type}</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input type="color" value={color} onChange={e => setTypeColors({ ...typeColors, [type]: e.target.value })} style={{ width: '40px', height: '40px', padding: '2px', background: 'none', border: 'none', cursor: 'pointer' }} />
-                <input type="text" value={color} onChange={e => setTypeColors({ ...typeColors, [type]: e.target.value })} style={{ flex: 1, textTransform: 'uppercase' }} />
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input type="color" value={toHexColor(color, '#333333')} onChange={e => setTypeColors({ ...typeColors, [type]: e.target.value.toUpperCase() })} style={{ width: '40px', height: '40px', padding: '2px', background: 'none', border: 'none', cursor: 'pointer' }} />
+                <input
+                  type="text"
+                  value={color}
+                  placeholder="#00F2FF"
+                  onChange={e => setTypeColors({ ...typeColors, [type]: e.target.value.toUpperCase() })}
+                  onBlur={e => setTypeColors({ ...typeColors, [type]: toHexColor(e.target.value, color) })}
+                  style={{ flex: 1, textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}
+                />
               </div>
             </div>
           ))}
@@ -1266,7 +1567,7 @@ function App() {
             <tr>
               <th style={{ width: '25%' }}>Nome (Ex: Chamadas)</th>
               <th>Caminho do Diretório / Arquivo</th>
-              <th style={{ width: '60px' }}>Cor</th>
+              <th style={{ width: '170px' }}>Cor HEX</th>
               <th style={{ width: '40px' }}></th>
             </tr>
           </thead>
@@ -1275,7 +1576,19 @@ function App() {
               <tr key={i}>
                 <td><input type="text" value={cv.name} onChange={e => { const next = [...customVars]; next[i].name = e.target.value.toUpperCase(); setCustomVars(next) }} placeholder="EX: PROGRAMETES" /></td>
                 <td><input type="text" value={cv.path} onChange={e => { const next = [...customVars]; next[i].path = e.target.value; setCustomVars(next) }} placeholder="U:\Materiais\..." /></td>
-                <td><input type="color" value={cv.color || '#333333'} onChange={e => { const next = [...customVars]; next[i].color = e.target.value; setCustomVars(next) }} style={{ width: '100%', height: '30px', padding: '0', background: 'none', border: 'none', cursor: 'pointer' }} /></td>
+                <td>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input type="color" value={toHexColor(cv.color || '#333333')} onChange={e => { const next = [...customVars]; next[i].color = e.target.value.toUpperCase(); setCustomVars(next) }} style={{ width: '38px', height: '34px', padding: '2px', background: 'none', border: 'none', cursor: 'pointer' }} />
+                    <input
+                      type="text"
+                      value={cv.color || '#333333'}
+                      placeholder="#333333"
+                      onChange={e => { const next = [...customVars]; next[i].color = e.target.value.toUpperCase(); setCustomVars(next) }}
+                      onBlur={e => { const next = [...customVars]; next[i].color = toHexColor(e.target.value, '#333333'); setCustomVars(next) }}
+                      style={{ fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase' }}
+                    />
+                  </div>
+                </td>
                 <td><button className="remove-row-btn" onClick={() => setCustomVars(customVars.filter((_, idx) => idx !== i))}><X size={14} /></button></td>
               </tr>
             ))}
@@ -1386,17 +1699,25 @@ function App() {
                 alert("Formato inválido! Use HH:MM")
               }
             }}>+ ADICIONAR BLOCO</button>
-            <button className="primary" onClick={handleSaveBLM} disabled={isBusy} style={{ width: 'auto', padding: '0 1.5rem' }}>
-              <Save size={16} style={{ marginRight: '8px' }} /> {isBusy ? 'SALVANDO...' : 'SALVAR MODELO'}
-            </button>
           </div>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', maxHeight: '75vh', overflowY: 'auto', paddingRight: '1rem' }}>
-          {blmContent.blocks.map((block, bIdx) => (
+          {blmContent.blocks.map((block, bIdx) => {
+            const blockKey = `${block.time}-${bIdx}`
+            const isExpanded = expandedBlmBlocks.has(blockKey)
+            return (
             <div key={block.time} className="blm-block-card glass" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-color)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <button
+                    onClick={() => toggleBlmBlock(blockKey)}
+                    className="secondary-btn"
+                    style={{ padding: '4px', minWidth: '28px', justifyContent: 'center' }}
+                    title={isExpanded ? 'Recolher bloco' : 'Expandir bloco'}
+                  >
+                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </button>
                   <h3 style={{ color: 'var(--accent-color)', margin: 0, fontSize: '1.2rem', fontWeight: 800 }}>🕒 Bloco das {block.time}</h3>
                   <button onClick={() => copyBlock(block)} className="secondary-btn" style={{ padding: '4px 8px', fontSize: '0.7rem' }} title="Copiar Estrutura">COPIAR</button>
                   <button onClick={() => pasteBlock(bIdx)} className="secondary-btn" style={{ padding: '4px 8px', fontSize: '0.7rem' }} title="Colar aqui">COLAR</button>
@@ -1431,6 +1752,7 @@ function App() {
                 </div>
               </div>
 
+              {isExpanded ? (
               <table className="lib-table" style={{ tableLayout: 'fixed', marginBottom: 0 }}>
                 <thead>
                   <tr>
@@ -1548,7 +1870,7 @@ function App() {
                             const cvName = type.replace('OUTRO_', '')
                             const cv = customVars.find(c => c.name === cvName)
                             const path = (cv?.path || '').trim()
-                            const isFile = path && path.match(/\.(mp3|wav|flac|m4a|mp4|m4v)\s*$/i)
+                            const isFile = path && path.match(/\.(mp3|wav|flac|m4a|aac|mp4|m4v)\s*$/i)
 
                             if (isFile) {
                               return <span style={{ fontSize: '0.85rem', fontWeight: 800 }}>{item.resource}</span>
@@ -1643,8 +1965,14 @@ function App() {
                   })}
                 </tbody>
               </table>
+              ) : (
+                <div style={{ padding: '1rem', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  Bloco recolhido · {block.items.length} itens
+                </div>
+              )}
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     )
@@ -1792,25 +2120,11 @@ function App() {
     )
   }
 
-  const renderGuide = () => (
-    <div className="guide-content glass card">
-      <h2 className="card-title"><BookOpen size={20} /> Manual Técnico v3.4</h2>
-      <div style={{ padding: '1rem' }}>
-        <h3>1. Subcategorias (Tags)</h3>
-        <p>Use para segmentar pastas grandes. Ex: pasta <strong>SERTANEJO</strong> com tag <strong>TOP</strong>.</p>
-        <p>No seu modelo .blmn, chame como: <code>SERTANEJO_TH.apm</code></p>
-
-        <h3 style={{ marginTop: '2rem' }}>2. Lógica de Scoring</h3>
-        <p>Score = Descanso * (Peso²) * Mult_Artista</p>
-        <p style={{ fontSize: '0.85rem', opacity: 0.6 }}>O peso é elevado ao quadrado para que sucessos (Peso 3+) dominem a programação rapidamente.</p>
-      </div>
-    </div>
-  )
-
   return (
     <div className="app-container">
       {renderBLMEditorModal()}
       {renderNewModelModal()}
+      {renderTrackDetailsModal()}
 
       <BusyBanner visible={isBackendBusy && !showEditor} />
       <AppHeader />
@@ -1822,10 +2136,9 @@ function App() {
         {activeTab === 'library' && renderLibrary()}
         {activeTab === 'blm_manager' && renderBLMList()}
         {activeTab === 'settings' && renderSettings()}
-        {activeTab === 'guide' && renderGuide()}
       </main>
 
-      <FloatingPlayer currentTrack={currentTrack} audioRef={audioRef} onClose={() => setCurrentTrack(null)} />
+      <FloatingPlayer currentTrack={currentTrack} audioRef={audioRef} onClose={() => { audioRef.current?.pause(); setIsAudioPlaying(false); setCurrentTrack(null) }} />
 
       {toastMessage && (
         <div className="toast">

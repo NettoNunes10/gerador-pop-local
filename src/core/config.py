@@ -2,6 +2,7 @@ import json
 import os
 
 CONFIG_FILE = "settings.json"
+AUDIO_EXTENSIONS = ('.mp3', '.wav', '.flac', '.m4a', '.aac')
 
 # Grupos de rotação padrão (configuráveis via settings.json)
 DEFAULT_ROTATION_GROUPS = [

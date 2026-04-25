@@ -7,7 +7,7 @@ import datetime
 import logging
 import threading
 from typing import Optional
-from .core.config import config
+from .core.config import AUDIO_EXTENSIONS, config
 from .core.engine import PlaylistEngine
 from .core.database import db
 from .core.enricher import MusicEnricher
@@ -170,7 +170,7 @@ def list_files(path: str):
     if os.path.isfile(path):
         return [os.path.basename(path)]
     try:
-        files = [f for f in os.listdir(path) if f.lower().endswith(('.mp3', '.flac', '.wav'))]
+        files = [f for f in os.listdir(path) if f.lower().endswith(AUDIO_EXTENSIONS)]
         return sorted(files)
     except:
         return []
@@ -395,7 +395,7 @@ def run_generation_task(start_date_str: str, days: int):
             current_date = start_date + datetime.timedelta(days=i)
             current_date_str = current_date.strftime('%Y%m%d')
             engine.log(f"--- Processando Dia {i+1}/{days}: {current_date_str} ---")
-            engine.generate_schedule(current_date_str)
+            engine.generate_schedule(current_date_str, manage_busy=False)
         engine.log("Geracao concluida com sucesso!")
     except Exception as e:
         engine.log(f"Erro critico na geracao: {str(e)}")

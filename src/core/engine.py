@@ -1,7 +1,7 @@
 import os
 import random
 import datetime as dt
-from .config import config
+from .config import AUDIO_EXTENSIONS, config
 from .models import PaidInsertion
 from .database import db
 from .enricher import MusicEnricher
@@ -80,7 +80,7 @@ class PlaylistEngine:
     def sync_folder_to_db(self, folder_path, category, analyze=True):
         if not os.path.exists(folder_path): return
         
-        files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.flac', '.m4a'))]
+        files = [f for f in os.listdir(folder_path) if f.lower().endswith(AUDIO_EXTENSIONS)]
         total = len(files)
         if total > 0:
             self.log(f"📡 Pasta '{category}': {total} arquivos encontrados.")
@@ -89,7 +89,7 @@ class PlaylistEngine:
         for index, f in enumerate(files):
             full_path = os.path.join(folder_path, f).replace('/', '\\')
             try:
-                cursor.execute("SELECT id, bpm, energy, valence, vibe FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
+                cursor.execute("SELECT id, bpm, energy, valence, vibe, duracao FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
                 row = cursor.fetchone()
 
                 # Processa se for novo OU se faltar dados de IA
@@ -132,7 +132,14 @@ class PlaylistEngine:
                     )
                 else:
                     # Se o arquivo já existe, checamos se ele tem dados de IA completos
-                    tid, bpm, energy, valence, vibe = row
+                    tid, bpm, energy, valence, vibe, duracao = row
+                    if not duracao or duracao <= 3:
+                        new_duration = self.get_audio_duration(full_path)
+                        if new_duration > 3:
+                            cursor.execute("UPDATE biblioteca SET duracao = ? WHERE id = ?", (new_duration, tid))
+                            db.conn.commit()
+                            self.log(f"[{index+1}/{total}] Duracao atualizada: {f} -> {new_duration}s")
+
                     if any(v in (None, 0) for v in (bpm, energy, valence, vibe)):
                         self.log(f"[{index+1}/{total}] Completando dados de IA: {f}")
                         success, result = self.enricher.enrich_track(tid)
@@ -207,16 +214,53 @@ class PlaylistEngine:
             from mutagen import File as MutagenFile
             audio = MutagenFile(filepath)
             if audio and audio.info:
-                return int(round(audio.info.length * 1000))
+                return int(round(audio.info.length))
         except:
             pass
-        return 3000
+        return 0
+
+    def duration_seconds_to_bil_ms(self, duration_seconds):
+        try:
+            seconds = float(duration_seconds or 0)
+        except (TypeError, ValueError):
+            seconds = 0
+        if seconds <= 0:
+            seconds = 3
+        return int(round(seconds * 1000))
 
     def make_bil_line(self, filepath, duration, mix="3000"):
-        return f"{filepath} /m:{mix} /t:{duration} /i:0 /s:0 /f:{duration} /r:0 /d:0 /o:0 /n:1 /x:  /g:0"
+        duration_ms = self.duration_seconds_to_bil_ms(duration)
+        return f"{filepath} /m:{mix} /t:{duration_ms} /i:0 /s:0 /f:{duration_ms} /r:0 /d:0 /o:0 /n:1 /x:  /g:0"
 
     def make_block_marker_line(self, time_str):
         return f"{time_str} /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:0 /n:1 /x:  /g:0"
+
+    def get_desktop_dir(self):
+        candidates = []
+        userprofile = os.environ.get("USERPROFILE")
+        if userprofile:
+            candidates.append(os.path.join(userprofile, "Desktop"))
+            candidates.append(os.path.join(userprofile, "OneDrive", "Desktop"))
+            candidates.append(os.path.join(userprofile, "Área de Trabalho"))
+            candidates.append(os.path.join(userprofile, "OneDrive", "Área de Trabalho"))
+        candidates.append(os.path.join(os.path.expanduser("~"), "Desktop"))
+
+        for path in candidates:
+            if path:
+                try:
+                    os.makedirs(path, exist_ok=True)
+                    return path
+                except Exception:
+                    continue
+        return os.getcwd()
+
+    def resolve_output_path(self, configured_dir, filename):
+        if configured_dir and os.path.isdir(configured_dir):
+            return os.path.join(configured_dir, filename), False
+
+        desktop_dir = self.get_desktop_dir()
+        self.log(f"[AVISO] Pasta de roteiros indisponivel: {configured_dir or '(nao configurada)'}. Salvando na Area de Trabalho: {desktop_dir}")
+        return os.path.join(desktop_dir, filename), True
 
     def serialize_model_line(self, item):
         if getattr(item, "raw_line", ""):
@@ -228,9 +272,11 @@ class PlaylistEngine:
         params.extend(f"/{key}:{value}" for key, value in item.params.items() if key not in order)
         return f"{item.resource} {' '.join(params)}"
 
-    def generate_schedule(self, date_str):
-        self.is_busy = True
+    def generate_schedule(self, date_str, manage_busy=True):
+        if manage_busy:
+            self.is_busy = True
         try:
+            db.clear_file_exists_cache()
             date_obj = dt.datetime.strptime(date_str, "%Y%m%d")
             weekday = date_obj.weekday()
 
@@ -248,7 +294,7 @@ class PlaylistEngine:
                 template_name = f"{os.path.splitext(template_name)[0]}.blmn"
 
             template_path = os.path.join(template_dir, template_name)
-            output_path = os.path.join(output_dir, f"{date_str}.bil")
+            output_path, using_output_fallback = self.resolve_output_path(output_dir, f"{date_str}.bil")
 
             if not os.path.exists(template_path):
                 legacy_template_path = os.path.join(template_dir, legacy_template_name) if legacy_template_name else None
@@ -314,8 +360,7 @@ class PlaylistEngine:
                         final_lines.append(raw_line)
                         continue
 
-                    cat_part = resource.split(" ", 1)[0]
-                    cat = cat_part.replace(".apm", "").replace(".APM", "")
+                    cat = os.path.splitext(resource)[0].strip()
 
                     is_custom = False
                     for cv in config.custom_vars:
@@ -340,7 +385,7 @@ class PlaylistEngine:
                         final_lines.append(self.make_bil_line(full_path, self.get_audio_duration(full_path), item.mix))
                         continue
 
-                    real_cat = cat.upper()
+                    real_cat = cat.split(" ", 1)[0].upper()
                     subcats_to_search = ['TOP', 'HIT', 'STD', 'OLD']
                     if "_" in real_cat:
                         real_cat, letters = real_cat.split("_", 1)
@@ -376,16 +421,28 @@ class PlaylistEngine:
                         final_lines.append(raw_line)
 
             import unicodedata
-            with open(output_path, 'w', encoding='latin-1', errors='replace') as f_out:
-                normalized_content = unicodedata.normalize('NFC', "\n".join(final_lines))
-                f_out.write(normalized_content)
+            normalized_content = unicodedata.normalize('NFC', "\n".join(final_lines))
+            try:
+                with open(output_path, 'w', encoding='latin-1', errors='replace') as f_out:
+                    f_out.write(normalized_content)
+            except OSError as write_error:
+                if using_output_fallback:
+                    raise
+                fallback_dir = self.get_desktop_dir()
+                fallback_path = os.path.join(fallback_dir, f"{date_str}.bil")
+                self.log(f"[AVISO] Falha ao salvar em {output_path}: {write_error}. Salvando na Area de Trabalho: {fallback_path}")
+                with open(fallback_path, 'w', encoding='latin-1', errors='replace') as f_out:
+                    f_out.write(normalized_content)
+                output_path = fallback_path
 
             self.log(f"Roteiro gerado com sucesso: {output_path}")
 
         except Exception as e:
             self.log(f"Erro na geracao: {str(e)}")
         finally:
-            self.is_busy = False
+            db.clear_file_exists_cache()
+            if manage_busy:
+                self.is_busy = False
 
     def select_music(self, folder_path, category, current_hour, subcategory=None, block_time="00:00", date_str=None, vibe_min=0, vibe_max=100):
         """Seleciona a melhor música baseado no ritmo (BPM) e descanso."""
@@ -398,7 +455,7 @@ class PlaylistEngine:
                 pass
         
         # Músicas normais precisam de descanso por tempo (4h)
-        candidate, score = db.get_best_candidate(
+        candidate, score, used_rest_fallback = db.get_best_candidate(
             category,
             current_hour,
             subcategory=subcategory,
@@ -411,13 +468,18 @@ class PlaylistEngine:
         if candidate:
             full_path = candidate['caminho_arquivo']
             track_id = candidate['id']
+            duration = candidate['duracao'] or 0
+            if duration <= 3:
+                duration = self.get_audio_duration(full_path)
             self.last_bpm = candidate['bpm'] or 0
             
             track_name = os.path.basename(full_path)
+            if used_rest_fallback:
+                self.log(f"  [{block_time}] AVISO [{category}] Sem opcao com descanso de 4h; usando fallback sem descanso minimo.")
             self.log(f"  [{block_time}] 🎵 [{category}] {track_name} (Score: {int(score)})")
             
             db.log_execution(full_path, scheduled_time=simulated_now)
-            return full_path, self.get_audio_duration(full_path), track_id
+            return full_path, int(duration), track_id
         
         self.log(f"  [{block_time}] ⚠️ [{category}] Nenhuma música disponível que respeite os filtros.")
         return None, 0, None
@@ -452,7 +514,7 @@ class PlaylistEngine:
             return full_path, self.get_audio_duration(full_path), None
 
         # 2. Se for um diretório, sorteia o item (evitando históricos)
-        files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.flac'))]
+        files = [f for f in os.listdir(folder_path) if f.lower().endswith(AUDIO_EXTENSIONS)]
         if not files: return None, 0, None
         
         # Histórico de 3 slots (lê o histórico de caminhos do banco)
