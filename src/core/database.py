@@ -228,7 +228,7 @@ class DatabaseManager:
             cursor.execute("INSERT OR IGNORE INTO artistas_favoritos (nome_artista) VALUES (?)", (artist.strip().upper(),))
         self.conn.commit()
 
-    def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_bpm=0, min_rest_hours=4, min_rest_slots=0, simulated_now=None):
+    def get_best_candidate(self, category_folder, current_hour, subcategory=None, last_bpm=0, min_rest_hours=4, min_rest_slots=0, simulated_now=None, vibe_min=0, vibe_max=100):
         cursor = self.conn.cursor()
         query = '''
             SELECT b.*,
@@ -245,6 +245,8 @@ class DatabaseManager:
             else:
                 query += " AND b.sub_categoria = ?"
                 params.append(subcategory)
+        query += " AND (b.vibe IS NULL OR (b.vibe >= ? AND b.vibe <= ?))"
+        params.extend([vibe_min, vibe_max])
         
         # Aleatoriedade via SQL e limite de busca para performance
         query += " ORDER BY RANDOM() LIMIT 500"

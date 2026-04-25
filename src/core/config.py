@@ -30,17 +30,19 @@ class ConfigManager:
         self.favorite_artists = set()
         self.paid_rules = []
         self.day_templates = {
-            "0": "SEGUNDA.blm",
-            "1": "TERCA.blm",
-            "2": "QUARTA.blm",
-            "3": "QUINTA.blm",
-            "4": "SEXTA.blm",
-            "5": "SABADO.blm",
-            "6": "DOMINGO.blm"
+            "0": "SEGUNDA.blmn",
+            "1": "TERCA.blmn",
+            "2": "QUARTA.blmn",
+            "3": "QUINTA.blmn",
+            "4": "SEXTA.blmn",
+            "5": "SABADO.blmn",
+            "6": "DOMINGO.blmn"
         }
         self.rotation_groups = DEFAULT_ROTATION_GROUPS[:]
         self.custom_vars = []  # Lista de dicts: {"name": "Nome", "path": "...", "color": "#..."}
         self.default_category = "SERTANEJO"
+        self.default_vibe_min = 0
+        self.default_vibe_max = 100
         self.type_colors = {
             'MUSICA': '#00f2ff',
             'VHT': '#bc13fe',
@@ -63,6 +65,8 @@ class ConfigManager:
                         self.rotation_groups = data.get('rotation_groups', DEFAULT_ROTATION_GROUPS[:])
                     self.custom_vars = data.get('custom_vars', [])
                     self.default_category = data.get('default_category', "SERTANEJO")
+                    self.default_vibe_min = data.get('default_vibe_min', 0)
+                    self.default_vibe_max = data.get('default_vibe_max', 100)
                     self.type_colors.update(data.get('type_colors', {}))
             except Exception as e:              pass
 
@@ -101,6 +105,14 @@ class ConfigManager:
                 self.custom_vars = new_config['custom_vars']
             if 'default_category' in new_config:
                 self.default_category = new_config['default_category']
+            if 'default_vibe_min' in new_config:
+                self.default_vibe_min = int(new_config['default_vibe_min'])
+            if 'default_vibe_max' in new_config:
+                self.default_vibe_max = int(new_config['default_vibe_max'])
+            self.default_vibe_min = max(0, min(100, self.default_vibe_min))
+            self.default_vibe_max = max(0, min(100, self.default_vibe_max))
+            if self.default_vibe_min > self.default_vibe_max:
+                self.default_vibe_max = self.default_vibe_min
             if 'type_colors' in new_config:
                 self.type_colors.update(new_config['type_colors'])
 
@@ -113,6 +125,8 @@ class ConfigManager:
             'rotation_groups': self.rotation_groups,
             'custom_vars': self.custom_vars,
             'default_category': self.default_category,
+            'default_vibe_min': self.default_vibe_min,
+            'default_vibe_max': self.default_vibe_max,
             'type_colors': self.type_colors
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:

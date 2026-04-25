@@ -11,7 +11,7 @@ from .core.config import config
 from .core.engine import PlaylistEngine
 from .core.database import db
 from .core.enricher import MusicEnricher
-from .blm_manager import BLMService, BLMFile, BLMLine
+from .blm_manager import BLMService
 
 # Configuração de Logging
 logging.basicConfig(level=logging.INFO)
@@ -48,7 +48,7 @@ def _resolve_under(base_dir: str, *parts: str) -> str:
 
 def _validate_blm_filename(filename: str) -> str:
     clean = os.path.basename(filename)
-    if clean != filename or not clean.lower().endswith(".blm"):
+    if clean != filename or not clean.lower().endswith((".blm", ".blmn")):
         raise HTTPException(status_code=400, detail="Nome de modelo invalido")
     return clean
 
@@ -92,7 +92,7 @@ def list_templates():
     template_dir = config.paths.get('MODELOS', config.paths.get('TEMPLATES'))
     if not template_dir or not os.path.exists(template_dir):
         return []
-    return [f for f in os.listdir(template_dir) if f.endswith('.blm')]
+    return sorted([f for f in os.listdir(template_dir) if f.lower().endswith(('.blmn', '.blm'))])
 
 @app.get("/blm/{filename}")
 def get_blm_content(filename: str):
@@ -103,18 +103,21 @@ def get_blm_content(filename: str):
     try:
         structured = BLMService.load_structured(path)
         return {
+            "format": "BLMN" if filename.lower().endswith(".blmn") else "BLM",
             "header": structured.header,
             "blocks": [
                 {
                     "time": b.time,
+                    "vibe_min": b.vibe_min,
+                    "vibe_max": b.vibe_max,
                     "items": [
-                        {"resource": l.resource, "params": l.params} 
+                        {"resource": l.resource, "mix": l.mix}
                         for l in b.items
                     ]
                 } for b in structured.blocks
             ],
-            "orphan_lines": [{"resource": l.resource, "params": l.params} for l in structured.orphan_lines],
-            "stats": BLMService.get_stats(BLMService.load(path))
+            "orphan_lines": [{"resource": l.resource, "mix": l.mix} for l in structured.orphan_lines],
+            "stats": BLMService.get_stats(structured)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -124,14 +127,8 @@ def save_blm_content(filename: str, data: dict = Body(...)):
     path = _template_path(filename)
     
     try:
-        blm = BLMFile(header=data.get("header", ""))
-        for line_data in data.get("lines", []):
-            blm.lines.append(BLMLine(
-                resource=line_data["resource"],
-                params=line_data["params"]
-            ))
-        
-        BLMService.save(blm, path)
+        model = BLMService.from_payload(data)
+        BLMService.save_structured(model, path)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -180,6 +177,8 @@ def get_config():
         "rotation_groups": config.rotation_groups,
         "custom_vars": config.custom_vars,
         "default_category": config.default_category,
+        "default_vibe_min": config.default_vibe_min,
+        "default_vibe_max": config.default_vibe_max,
         "type_colors": config.type_colors
     }
 

@@ -29,7 +29,7 @@ class BLMParser:
         for key, value in matches:
             params[key] = value # Mantém como string para preservar espaços originais
             
-        return BLMLine(resource=resource, params=params, raw_line=line_text)
+        return BLMLine(resource=resource, params=params, mix=params.get('m', '3000'), raw_line=line_text)
 
     @staticmethod
     def serialize_line(line: BLMLine) -> str:

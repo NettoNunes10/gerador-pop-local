@@ -71,6 +71,8 @@ function App() {
   const [customVars, setCustomVars] = useState([])
   const [customFiles, setCustomFiles] = useState({})
   const [defaultCategory, setDefaultCategory] = useState('SERTANEJO')
+  const [defaultVibeMin, setDefaultVibeMin] = useState(0)
+  const [defaultVibeMax, setDefaultVibeMax] = useState(100)
   const [typeColors, setTypeColors] = useState({
     MUSICA: '#00f2ff',
     VHT: '#bc13fe',
@@ -143,6 +145,8 @@ function App() {
       }
       if (data.rotation_groups) setRotationGroups(data.rotation_groups)
       if (data.default_category) setDefaultCategory(data.default_category)
+      setDefaultVibeMin(Number(data.default_vibe_min ?? 0))
+      setDefaultVibeMax(Number(data.default_vibe_max ?? 100))
       if (data.type_colors) setTypeColors(data.type_colors)
     } catch {
       setIsOffline(true)
@@ -300,6 +304,8 @@ function App() {
           rotation_groups: rotationGroups,
           custom_vars: customVars.map(cv => ({ ...cv, path: (cv.path || '').trim() })),
           default_category: defaultCategory,
+          default_vibe_min: Number(defaultVibeMin),
+          default_vibe_max: Number(defaultVibeMax),
           type_colors: typeColors
         })
       })
@@ -437,12 +443,21 @@ function App() {
       // Adiciona os itens do bloco
       flatLines.push(...block.items)
     })
+    const blocks = blmContent.blocks.map(block => ({
+      time: block.time,
+      vibe_min: Number(block.vibe_min ?? defaultVibeMin),
+      vibe_max: Number(block.vibe_max ?? defaultVibeMax),
+      items: block.items.map(item => ({
+        resource: item.resource,
+        mix: String(item.mix ?? item.params?.m ?? '3000')
+      }))
+    }))
 
     try {
       const res = await fetch(`${API_URL}/blm/${selectedBLM}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ header: blmContent.header, lines: flatLines })
+        body: JSON.stringify({ header: blmContent.header, lines: flatLines, blocks, orphan_lines: blmContent.orphan_lines || [] })
       })
       if (res.ok) {
         showToast("✅ Modelo salvo com sucesso!")
@@ -478,10 +493,10 @@ function App() {
 
   const handleDuplicateBLM = async (e, filename) => {
     e.stopPropagation()
-    const newName = window.prompt(`Digite o nome para a cópia de "${filename}":`, filename.replace('.blm', '_COPIA'))
+    const newName = window.prompt(`Digite o nome para a cópia de "${filename}":`, filename.replace(/\.(blm|blmn)$/i, '_COPIA'))
     if (!newName) return
 
-    const finalName = newName.endsWith('.blm') ? newName : newName + '.blm'
+    const finalName = /\.(blm|blmn)$/i.test(newName) ? newName : newName + '.blmn'
 
     setIsBusy(true)
     try {
@@ -496,12 +511,21 @@ function App() {
         flatLines.push({ resource: block.time, params: { m: '0', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', o: '0', n: '1', x: '  ', g: '0' } })
         flatLines.push(...block.items)
       })
+      const blocks = data.blocks.map(block => ({
+        time: block.time,
+        vibe_min: Number(block.vibe_min ?? defaultVibeMin),
+        vibe_max: Number(block.vibe_max ?? defaultVibeMax),
+        items: (block.items || []).map(item => ({
+          resource: item.resource,
+          mix: String(item.mix ?? item.params?.m ?? '3000')
+        }))
+      }))
 
       // 3. Salva com o novo nome
       const resSave = await safeFetch(`${API_URL}/blm/${finalName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lines: flatLines })
+        body: JSON.stringify({ header: data.header || '', lines: flatLines, blocks, orphan_lines: data.orphan_lines || [] })
       })
 
       if (resSave.ok) {
@@ -521,9 +545,8 @@ function App() {
     const nextBlocks = [...blmContent.blocks]
     const item = nextBlocks[blockIndex].items[itemIndex]
 
-    if (field.startsWith('param_')) {
-      const pKey = field.split('_')[1]
-      item.params = { ...item.params, [pKey]: value }
+    if (field === 'mix') {
+      item.mix = value
     } else {
       item[field] = value
     }
@@ -535,7 +558,7 @@ function App() {
     const nextBlocks = [...blmContent.blocks]
     const newItem = {
       resource: (defaultCategory || 'SERTANEJO') + '.apm',
-      params: { m: '3000', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', o: '2', n: '1', x: '  ', g: '0' }
+      mix: '3000'
     }
     // Adiciona ABAIXO (index + 1)
     nextBlocks[blockIndex].items.splice(itemIndex + 1, 0, newItem)
@@ -618,23 +641,23 @@ function App() {
     switch (newType) {
       case 'RESERVA':
         item.resource = 'Reserva do beMidia'
-        item.params = { ...item.params, o: '5', m: '4294967295', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', n: '1', x: '  ', g: '0' }
+        item.mix = '4294967295'
         break
       case 'VHT':
         item.resource = 'VINHETA.apm'
-        item.params = { ...item.params, o: '2', m: '0', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', n: '1', x: '  ', g: '0' }
+        item.mix = '0'
         break
       case 'PREFIXO':
         item.resource = editablePaths['PREFIXO'] || 'U:\\Materiais\\Eventos Gerais\\Prefixo\\PREFIXO POP FM.mp3'
-        item.params = { ...item.params, o: '0', m: '1500', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', n: '1', x: '  ', g: '0' }
+        item.mix = '1500'
         break
       case 'MUSICA':
         item.resource = (defaultCategory || categories[0] || 'SERTANEJO') + '.apm'
-        item.params = { ...item.params, o: '2', m: '3000', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', n: '1', x: '  ', g: '0' }
+        item.mix = '3000'
         break
       case 'CAMINHO':
         item.resource = ''
-        item.params = { ...item.params, o: '0', m: '3000', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', n: '1', x: '  ', g: '0' }
+        item.mix = '3000'
         break
       default:
         if (newType.startsWith('OUTRO_')) {
@@ -646,7 +669,7 @@ function App() {
           } else {
             item.resource = `${name}.apm`
           }
-          item.params = { ...item.params, o: '2', m: '0', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', n: '1', x: '  ', g: '0' }
+          item.mix = '3000'
         }
     }
     setBlmContent({ ...blmContent, blocks: nextBlocks })
@@ -682,7 +705,9 @@ function App() {
 
     const newBlock = {
       time: time,
-      items: [{ resource: 'Reserva do beMidia', params: { m: '4294967295', t: '0', i: '0', s: '0', f: '0', r: '0', d: '0', o: '5', n: '1', x: '  ', g: '0' } }]
+      vibe_min: Number(defaultVibeMin),
+      vibe_max: Number(defaultVibeMax),
+      items: [{ resource: 'Reserva do beMidia', mix: '4294967295' }]
     }
 
     nextBlocks.push(newBlock)
@@ -697,11 +722,22 @@ function App() {
     setBlmContent({ ...blmContent, blocks: nextBlocks })
   }
 
+  const updateBlockVibe = (index, field, value) => {
+    const nextBlocks = [...blmContent.blocks]
+    const numericValue = Math.max(0, Math.min(100, Number(value)))
+    nextBlocks[index] = { ...nextBlocks[index], [field]: numericValue }
+    if (Number(nextBlocks[index].vibe_min) > Number(nextBlocks[index].vibe_max)) {
+      const pairedField = field === 'vibe_min' ? 'vibe_max' : 'vibe_min'
+      nextBlocks[index] = { ...nextBlocks[index], [pairedField]: numericValue }
+    }
+    setBlmContent({ ...blmContent, blocks: nextBlocks })
+  }
+
   const handleCreateNewModel = () => {
     if (!newModelName) return alert("Digite um nome para o modelo")
 
     let finalName = newModelName
-    if (!finalName.toLowerCase().endsWith('.blm')) finalName += '.blm'
+    if (!/\.(blm|blmn)$/i.test(finalName)) finalName += '.blmn'
 
     const times = []
     if (newModelInterval === 'custom') {
@@ -719,15 +755,26 @@ function App() {
 
     const newBlocks = times.map(t => ({
       time: t,
-      items: [{ resource: 'Reserva do beMidia', params: { m: '4294967295', t: '0', o: '5', n: '1' } }]
+      vibe_min: Number(defaultVibeMin),
+      vibe_max: Number(defaultVibeMax),
+      items: [{ resource: 'Reserva do beMidia', mix: '4294967295' }]
     }))
 
     setSelectedBLM(finalName)
     setBlmContent({
-      header: "# Arquivo de roteiro da beAudio\t1\t550152196",
+      header: "",
       blocks: newBlocks,
       orphan_lines: []
     })
+    setBlmStats({
+      total_lines: newBlocks.reduce((total, block) => total + block.items.length + 1, 0),
+      music_slots: 0,
+      sweeper_slots: 0,
+      commercial_blocks: newBlocks.length,
+      fixed_files: 0,
+      markers: newBlocks.length
+    })
+    setShowEditor(true)
     setShowNewModelModal(false)
     setNewModelName('')
     setSelectedCustomSlots(new Set())
@@ -1081,6 +1128,21 @@ function App() {
       <h2 className="card-title"><Settings size={20} /> Configurações Avançadas</h2>
 
       <section style={{ marginBottom: '3rem' }}>
+        <h3>Vibe Padrão dos Blocos</h3>
+        <p style={{ opacity: 0.6, fontSize: '0.85rem', marginBottom: '1rem' }}>Define a faixa de vibe usada ao criar novos blocos e novos modelos .blmn.</p>
+        <div className="config-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', maxWidth: '520px' }}>
+          <div className="input-group">
+            <label>Vibe mínima</label>
+            <input type="number" min="0" max="100" value={defaultVibeMin} onChange={e => setDefaultVibeMin(Math.max(0, Math.min(100, Number(e.target.value))))} />
+          </div>
+          <div className="input-group">
+            <label>Vibe máxima</label>
+            <input type="number" min="0" max="100" value={defaultVibeMax} onChange={e => setDefaultVibeMax(Math.max(0, Math.min(100, Number(e.target.value))))} />
+          </div>
+        </div>
+      </section>
+
+      <section style={{ marginBottom: '3rem' }}>
         <h3>🎚️ Grupos de Rotação</h3>
         <p style={{ opacity: 0.6, fontSize: '0.85rem', marginBottom: '1rem' }}>Define os thresholds de peso de cada grupo. Novos arquivos entram como STD.</p>
         <table className="config-table">
@@ -1098,7 +1160,7 @@ function App() {
       </section>
 
       <section style={{ marginBottom: '3rem' }}>
-        <h3>📅 Modelos por Dia da Semana (.blm)</h3>
+        <h3>📅 Modelos por Dia da Semana (.blmn)</h3>
         <div className="config-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
           {['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'].map((day, i) => (
             <div key={day} className="input-group">
@@ -1235,7 +1297,7 @@ function App() {
           <h2 style={{ margin: 0, fontSize: '1.8rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <ClipboardList size={28} color="var(--accent-color)" /> Bibliotecas de Programação
           </h2>
-          <p style={{ opacity: 0.6, fontSize: '0.95rem', marginTop: '6px' }}>Gerencie seus modelos de grade horária (.blm)</p>
+          <p style={{ opacity: 0.6, fontSize: '0.95rem', marginTop: '6px' }}>Gerencie seus modelos de grade horária (.blmn)</p>
         </div>
         <button className="primary-btn" onClick={() => setShowNewModelModal(true)} style={{ padding: '0.8rem 1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Plus size={20} /> NOVO MODELO
@@ -1283,7 +1345,7 @@ function App() {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
-              <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>MODELO BEAUDIO</span>
+              <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>{t.toLowerCase().endsWith('.blmn') ? 'MODELO BLMN' : 'MODELO BEAUDIO'}</span>
               <button className="secondary-btn" style={{ padding: '4px 12px', fontSize: '0.7rem' }}>EDITAR ROTEIRO</button>
             </div>
           </div>
@@ -1293,7 +1355,7 @@ function App() {
       {availableTemplates.length === 0 && (
         <div style={{ textAlign: 'center', padding: '5rem', opacity: 0.4 }}>
           <ClipboardList size={48} style={{ marginBottom: '1rem' }} />
-          <p>Nenhum modelo .blm encontrado na pasta de roteiros.</p>
+          <p>Nenhum modelo .blmn encontrado na pasta de roteiros.</p>
         </div>
       )}
     </div>
@@ -1341,7 +1403,27 @@ function App() {
                     <Trash2 size={16} />
                   </button>
                 </div>
-                <button className="secondary-btn" onClick={() => addBLMItem(bIdx, -1)} style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}>+ ADICIONAR ITEM</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <label style={{ fontSize: '0.72rem', opacity: 0.65 }}>Vibe</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={block.vibe_min ?? defaultVibeMin}
+                    onChange={e => updateBlockVibe(bIdx, 'vibe_min', e.target.value)}
+                    style={{ width: '64px', padding: '0.35rem', fontSize: '0.75rem', textAlign: 'center' }}
+                  />
+                  <span style={{ opacity: 0.5 }}>até</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={block.vibe_max ?? defaultVibeMax}
+                    onChange={e => updateBlockVibe(bIdx, 'vibe_max', e.target.value)}
+                    style={{ width: '64px', padding: '0.35rem', fontSize: '0.75rem', textAlign: 'center' }}
+                  />
+                  <button className="secondary-btn" onClick={() => addBLMItem(bIdx, -1)} style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem' }}>+ ADICIONAR ITEM</button>
+                </div>
               </div>
 
               <table className="lib-table" style={{ tableLayout: 'fixed', marginBottom: 0 }}>
@@ -1357,7 +1439,7 @@ function App() {
                 </thead>
                 <tbody>
                   {block.items.map((item, iIdx) => {
-                    const type = getItemType(item.resource, item.params.o)
+                    const type = getItemType(item.resource)
                     const isInvalid = type === 'INVALID'
 
                     let typeColor = 'rgba(255,255,255,0.05)'
@@ -1515,8 +1597,8 @@ function App() {
                         <td>
                           <input
                             type="text"
-                            value={item.params.m || '0'}
-                            onChange={e => updateBLMItem(bIdx, iIdx, 'param_m', e.target.value)}
+                            value={item.mix ?? item.params?.m ?? '3000'}
+                            onChange={e => updateBLMItem(bIdx, iIdx, 'mix', e.target.value)}
                             style={{
                               width: '100%',
                               background: 'rgba(0,0,0,0.2)',
@@ -1573,7 +1655,7 @@ function App() {
             <button onClick={() => setShowNewModelModal(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}><X size={24} /></button>
           </div>
           <div className="input-group">
-            <label>Nome do Modelo (sem .blm)</label>
+            <label>Nome do Modelo (sem .blmn)</label>
             <input type="text" value={newModelName} onChange={e => setNewModelName(e.target.value)} placeholder="Ex: MANHA_SERTANEJA" />
           </div>
           <div className="input-group">
@@ -1711,7 +1793,7 @@ function App() {
       <div style={{ padding: '1rem' }}>
         <h3>1. Subcategorias (Tags)</h3>
         <p>Use para segmentar pastas grandes. Ex: pasta <strong>SERTANEJO</strong> com tag <strong>TOP</strong>.</p>
-        <p>No seu arquivo .blm, chame como: <code>SERTANEJO TOP.apm</code></p>
+        <p>No seu modelo .blmn, chame como: <code>SERTANEJO_TH.apm</code></p>
 
         <h3 style={{ marginTop: '2rem' }}>2. Lógica de Scoring</h3>
         <p>Score = Descanso * (Peso²) * Mult_Artista</p>

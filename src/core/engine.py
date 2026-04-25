@@ -5,6 +5,7 @@ from .config import config
 from .models import PaidInsertion
 from .database import db
 from .enricher import MusicEnricher
+from ..blm_manager import BLMService
 
 
 class PlaylistEngine:
@@ -385,7 +386,172 @@ class PlaylistEngine:
         finally:
             self.is_busy = False
 
-    def select_music(self, folder_path, category, current_hour, subcategory=None, block_time="00:00", date_str=None):
+    def make_bil_line(self, filepath, duration, mix="3000"):
+        return f"{filepath} /m:{mix} /t:{duration} /i:0 /s:0 /f:{duration} /r:0 /d:0 /o:0 /n:1 /x:  /g:0"
+
+    def make_block_marker_line(self, time_str):
+        return f"{time_str} /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:0 /n:1 /x:  /g:0"
+
+    def serialize_model_line(self, item):
+        if getattr(item, "raw_line", ""):
+            return item.raw_line
+        if not item.params:
+            return item.resource
+        order = ['m', 't', 'i', 's', 'f', 'r', 'd', 'o', 'n', 'x', 'g']
+        params = [f"/{key}:{item.params[key]}" for key in order if key in item.params]
+        params.extend(f"/{key}:{value}" for key, value in item.params.items() if key not in order)
+        return f"{item.resource} {' '.join(params)}"
+
+    def generate_schedule(self, date_str):
+        self.is_busy = True
+        try:
+            date_obj = dt.datetime.strptime(date_str, "%Y%m%d")
+            weekday = date_obj.weekday()
+
+            template_name = "SEMANAL.blmn"
+            if weekday == 5:
+                template_name = "SABADO.blmn"
+            elif weekday == 6:
+                template_name = "DOMINGO.blmn"
+
+            template_name = config.day_templates.get(str(weekday), template_name)
+            template_dir = config.get_path('MODELOS') or config.get_path('TEMPLATES')
+            output_dir = config.get_path('ROTEIROS') or config.get_path('OUTPUT')
+            template_path = os.path.join(template_dir, template_name)
+            output_path = os.path.join(output_dir, f"{date_str}.bil")
+
+            if not os.path.exists(template_path):
+                self.log(f"Erro: Modelo nao encontrado: {template_path}")
+                return
+
+            model = BLMService.load_structured(template_path)
+            valid_blocks = [("00:00" if block.time == "24:00" else block.time) for block in model.blocks]
+
+            paid_reservations = {}
+            if weekday < 5:
+                self.log("Agendando musicas pagas...")
+                for rule in config.paid_rules:
+                    start_str = rule['start'].replace("24:00", "00:00")
+                    end_str = rule['end'].replace("24:00", "00:00")
+                    start_t = dt.datetime.strptime(start_str, "%H:%M").time()
+                    end_t = dt.datetime.strptime(end_str, "%H:%M").time()
+
+                    candidates = []
+                    for block_time in valid_blocks:
+                        block_t = dt.datetime.strptime(block_time, "%H:%M").time()
+                        if start_t <= block_t < end_t:
+                            candidates.append(block_time)
+
+                    if candidates:
+                        chosen = random.choice(candidates)
+                        if chosen not in paid_reservations:
+                            paid_reservations[chosen] = []
+                        paid_reservations[chosen].append(rule['filename'])
+
+            self.log(f"Gerando: {template_name} -> {date_str}.bil")
+            final_lines = ["# Arquivo de roteiro da beAudio\t1\t550470001"]
+
+            for block in model.blocks:
+                current_block_time = "00:00" if block.time == "24:00" else block.time
+                vibe_min = int(getattr(block, "vibe_min", 0))
+                vibe_max = int(getattr(block, "vibe_max", 100))
+                pending_paid = paid_reservations.get(current_block_time, [])[:]
+
+                final_lines.append(self.make_block_marker_line(current_block_time))
+
+                for item in block.items:
+                    raw_line = self.serialize_model_line(item).strip()
+                    resource = (item.resource or "").strip()
+                    if not resource:
+                        continue
+
+                    if 'Reserva' in resource or 'Início' in resource or 'Inicio' in resource:
+                        final_lines.append("Início do bloco comercial /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:3 /n:1 /x: /g:0")
+                        final_lines.append("Término do bloco comercial /m:0 /t:0 /i:0 /s:0 /f:0 /r:0 /d:0 /o:4 /n:1 /x: /g:0")
+                        continue
+
+                    if 'PREFIXO' in resource or resource.startswith('U:\\'):
+                        final_lines.append(raw_line)
+                        continue
+
+                    if ".apm" not in resource.lower():
+                        final_lines.append(raw_line)
+                        continue
+
+                    cat_part = resource.split(" ", 1)[0]
+                    cat = cat_part.replace(".apm", "").replace(".APM", "")
+
+                    is_custom = False
+                    for cv in config.custom_vars:
+                        if cv['name'].upper() == cat.upper():
+                            is_custom = True
+                            file_path, duration, tid = self.select_from_path(cv['path'], cat, current_block_time, date_str)
+                            break
+
+                    if is_custom:
+                        final_lines.append(self.make_bil_line(file_path, duration, item.mix) if file_path else raw_line)
+                        continue
+
+                    if cat.upper() == "VINHETA":
+                        file_path, duration, tid = self.select_item("VINHETA", current_block_time, date_str)
+                        final_lines.append(self.make_bil_line(file_path, duration, item.mix) if file_path else raw_line)
+                        continue
+
+                    if pending_paid:
+                        paid_file = pending_paid.pop(0)
+                        self.log(f"  [{current_block_time}] [PAID] {paid_file} (Substituindo {cat})")
+                        full_path = os.path.join(config.get_path('MUSIC_ROOT'), 'ESPECIAL', paid_file).replace('/', '\\')
+                        final_lines.append(self.make_bil_line(full_path, self.get_audio_duration(full_path), item.mix))
+                        continue
+
+                    real_cat = cat.upper()
+                    subcats_to_search = ['TOP', 'HIT', 'STD', 'OLD']
+                    if "_" in real_cat:
+                        real_cat, letters = real_cat.split("_", 1)
+                        subcats_to_search = []
+                        if 'T' in letters:
+                            subcats_to_search.append('TOP')
+                        if 'H' in letters:
+                            subcats_to_search.append('HIT')
+                        if 'S' in letters:
+                            subcats_to_search.append('STD')
+                        if 'O' in letters:
+                            subcats_to_search.append('OLD')
+                        if not subcats_to_search:
+                            subcats_to_search = ['TOP', 'HIT', 'STD', 'OLD']
+
+                    file_path, duration, tid = self.select_music(
+                        "",
+                        real_cat,
+                        int(current_block_time[:2]),
+                        subcategory=subcats_to_search,
+                        block_time=current_block_time,
+                        date_str=date_str,
+                        vibe_min=vibe_min,
+                        vibe_max=vibe_max,
+                    )
+
+                    if file_path:
+                        exec_time = f"{date_str} {current_block_time}:00"
+                        if tid:
+                            db.update_last_played(tid, exec_time)
+                        final_lines.append(self.make_bil_line(file_path, duration, item.mix))
+                    else:
+                        final_lines.append(raw_line)
+
+            import unicodedata
+            with open(output_path, 'w', encoding='latin-1', errors='replace') as f_out:
+                normalized_content = unicodedata.normalize('NFC', "\n".join(final_lines))
+                f_out.write(normalized_content)
+
+            self.log(f"Roteiro gerado com sucesso: {output_path}")
+
+        except Exception as e:
+            self.log(f"Erro na geracao: {str(e)}")
+        finally:
+            self.is_busy = False
+
+    def select_music(self, folder_path, category, current_hour, subcategory=None, block_time="00:00", date_str=None, vibe_min=0, vibe_max=100):
         """Seleciona a melhor música baseado no ritmo (BPM) e descanso."""
         # Constrói o datetime simulado do bloco para cálculos de descanso corretos
         simulated_now = None
@@ -396,7 +562,16 @@ class PlaylistEngine:
                 pass
         
         # Músicas normais precisam de descanso por tempo (4h)
-        candidate, score = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_bpm=self.last_bpm, min_rest_hours=4, simulated_now=simulated_now)
+        candidate, score = db.get_best_candidate(
+            category,
+            current_hour,
+            subcategory=subcategory,
+            last_bpm=self.last_bpm,
+            min_rest_hours=4,
+            simulated_now=simulated_now,
+            vibe_min=vibe_min,
+            vibe_max=vibe_max,
+        )
         if candidate:
             full_path = candidate['caminho_arquivo']
             track_id = candidate['id']
