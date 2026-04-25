@@ -56,6 +56,10 @@ def _template_path(filename: str) -> str:
     template_dir = config.paths.get('MODELOS', config.paths.get('TEMPLATES'))
     return _resolve_under(template_dir, _validate_blm_filename(filename))
 
+def _converted_blmn_path(filename: str) -> str:
+    stem = os.path.splitext(_validate_blm_filename(filename))[0]
+    return _template_path(f"{stem}.blmn")
+
 def _allowed_roots():
     roots = []
     for value in config.paths.values():
@@ -102,8 +106,17 @@ def get_blm_content(filename: str):
     
     try:
         structured = BLMService.load_structured(path)
+        response_filename = filename
+        converted_from = None
+        if filename.lower().endswith(".blm"):
+            converted_from = filename
+            response_filename = f"{os.path.splitext(filename)[0]}.blmn"
+            BLMService.save_structured(structured, _converted_blmn_path(filename))
+
         return {
-            "format": "BLMN" if filename.lower().endswith(".blmn") else "BLM",
+            "format": "BLMN",
+            "filename": response_filename,
+            "converted_from": converted_from,
             "header": structured.header,
             "blocks": [
                 {
@@ -124,6 +137,8 @@ def get_blm_content(filename: str):
 
 @app.post("/blm/{filename}")
 def save_blm_content(filename: str, data: dict = Body(...)):
+    if filename.lower().endswith(".blm"):
+        raise HTTPException(status_code=400, detail="Modelos .blm sao somente leitura. Abra o arquivo para converter automaticamente para .blmn.")
     path = _template_path(filename)
     
     try:

@@ -414,6 +414,11 @@ function App() {
       safeFetch(`${API_URL}/blm/${filename}`)
         .then(r => r.json())
         .then(data => {
+          if (data.filename && data.filename !== filename) {
+            setSelectedBLM(data.filename)
+            showToast(`Modelo convertido para ${data.filename}`)
+            fetchTemplates()
+          }
           setBlmContent(data)
           setBlmStats(data.stats || null)
           setShowEditor(true)
@@ -496,7 +501,7 @@ function App() {
     const newName = window.prompt(`Digite o nome para a cópia de "${filename}":`, filename.replace(/\.(blm|blmn)$/i, '_COPIA'))
     if (!newName) return
 
-    const finalName = /\.(blm|blmn)$/i.test(newName) ? newName : newName + '.blmn'
+    const finalName = newName.replace(/\.(blm|blmn)$/i, '') + '.blmn'
 
     setIsBusy(true)
     try {
@@ -737,7 +742,7 @@ function App() {
     if (!newModelName) return alert("Digite um nome para o modelo")
 
     let finalName = newModelName
-    if (!/\.(blm|blmn)$/i.test(finalName)) finalName += '.blmn'
+    finalName = finalName.replace(/\.(blm|blmn)$/i, '') + '.blmn'
 
     const times = []
     if (newModelInterval === 'custom') {
