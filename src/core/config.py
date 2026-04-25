@@ -15,19 +15,20 @@ class ConfigManager:
     def __init__(self):
         self.paths = {
             'MUSIC_ROOT': 'M:/',
-            'SWEEPERS': 'U:/Materiais/Eventos Gerais/VHT - Geração',
+            'VINHETA': 'U:/Materiais/Eventos Gerais/VHT - Geração',
+            'PREFIXO': 'U:/Materiais/Eventos Gerais/Prefixo/PREFIXO POP FM.mp3',
             'PROMOS': 'U:/Materiais/Eventos Gerais/Chamadas Programas',
             'INTERCOM': 'U:/Materiais/Eventos Gerais/Intercom',
             'SAMPLES': 'U:/Materiais/Eventos Gerais/Amostra Musical',
-            'TEMPLATES': 'U:/Materiais/Roteiros/Modelos',
-            'OUTPUT': 'U:/Materiais/Roteiros',
-            'FIXED_PREFIX': 'U:/Materiais/Eventos Gerais/Prefixo/PREFIXO POP FM.mp3',
+            'MODELOS': 'U:/Materiais/Roteiros/Modelos',
+            'ROTEIROS': 'U:/Materiais/Roteiros',
             'spotify_client_id': '',
-            'spotify_client_secret': ''
+            'spotify_client_secret': '',
+            'ENRICHMENT_API_URL': 'http://localhost:8001/enrich'
         }
+        self.artist_separation = 9
         self.favorite_artists = set()
         self.paid_rules = []
-        self.surprise_rules = []
         self.day_templates = {
             "0": "SEGUNDA.blm",
             "1": "TERCA.blm",
@@ -38,6 +39,14 @@ class ConfigManager:
             "6": "DOMINGO.blm"
         }
         self.rotation_groups = DEFAULT_ROTATION_GROUPS[:]
+        self.custom_vars = []  # Lista de dicts: {"name": "Nome", "path": "...", "color": "#..."}
+        self.default_category = "SERTANEJO"
+        self.type_colors = {
+            'MUSICA': '#00f2ff',
+            'VHT': '#bc13fe',
+            'RESERVA': '#ffaa00',
+            'PREFIXO': '#4cd964'
+        }
         self.load()
 
     def load(self):
@@ -47,13 +56,15 @@ class ConfigManager:
                     data = json.load(f)
                     self.paths.update(data.get('paths', {}))
                     self.favorite_artists = set(data.get('favorite_artists', []))
+                    self.artist_separation = data.get('artist_separation', 9)
                     self.paid_rules = data.get('paid_rules', [])
-                    self.surprise_rules = data.get('surprise_rules', [])
                     self.day_templates.update(data.get('day_templates', {}))
                     if 'rotation_groups' in data:
-                        self.rotation_groups = data['rotation_groups']
-            except:
-                pass
+                        self.rotation_groups = data.get('rotation_groups', DEFAULT_ROTATION_GROUPS[:])
+                    self.custom_vars = data.get('custom_vars', [])
+                    self.default_category = data.get('default_category', "SERTANEJO")
+                    self.type_colors.update(data.get('type_colors', {}))
+            except Exception as e:              pass
 
     def get_path(self, key):
         return self.paths.get(key, "")
@@ -82,20 +93,27 @@ class ConfigManager:
                 self.favorite_artists = set(new_config['favorite_artists'])
             if 'paid_rules' in new_config:
                 self.paid_rules = new_config['paid_rules']
-            if 'surprise_rules' in new_config:
-                self.surprise_rules = new_config['surprise_rules']
             if 'day_templates' in new_config:
                 self.day_templates.update(new_config['day_templates'])
             if 'rotation_groups' in new_config:
                 self.rotation_groups = new_config['rotation_groups']
+            if 'custom_vars' in new_config:
+                self.custom_vars = new_config['custom_vars']
+            if 'default_category' in new_config:
+                self.default_category = new_config['default_category']
+            if 'type_colors' in new_config:
+                self.type_colors.update(new_config['type_colors'])
 
         data = {
             'paths': self.paths,
+            'artist_separation': self.artist_separation,
             'favorite_artists': list(self.favorite_artists),
             'paid_rules': self.paid_rules,
-            'surprise_rules': self.surprise_rules,
             'day_templates': self.day_templates,
-            'rotation_groups': self.rotation_groups
+            'rotation_groups': self.rotation_groups,
+            'custom_vars': self.custom_vars,
+            'default_category': self.default_category,
+            'type_colors': self.type_colors
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)

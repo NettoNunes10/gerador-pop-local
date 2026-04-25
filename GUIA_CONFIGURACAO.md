@@ -51,7 +51,7 @@ Configure estas pastas na aba **"Configurações"** do Dashboard:
 ## 🚀 Solução de Problemas (Troubleshooting)
 
 ### "Backend parou inesperadamente"
-Isso geralmente ocorre por **conflito de porta**. O script `run.py` v2.1 agora detecta isso automaticamente e avisa se a porta 8000 já estiver sendo usada por outra instância.
+Isso geralmente ocorre por **conflito de porta**. O script `run.py` v2.1 agora detecta isso automaticamente e avisa se a porta 8002 já estiver sendo usada por outra instância.
 
 ### "Música não encontrada"
 Certifique-se de que o `MUSIC_ROOT` no Dashboard termina com uma barra invertida no Windows (ex: `C:\Musicas\`) ou use o seletor de caminhos atualizado.

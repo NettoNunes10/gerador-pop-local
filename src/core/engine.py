@@ -4,8 +4,8 @@ import datetime as dt
 from .config import config
 from .models import PaidInsertion
 from .database import db
-from .analyzer import analyzer
-from .bpm_service import bpm_service
+from .enricher import MusicEnricher
+
 
 class PlaylistEngine:
     def __init__(self, log_callback=None):
@@ -14,6 +14,7 @@ class PlaylistEngine:
         self.log_callback = log_callback
         self.is_busy = False
         self.logs = []
+        self.enricher = None # Será inicializado sob demanda ou no sync
 
     def log(self, message):
         timestamp = dt.datetime.now().strftime("%H:%M:%S")
@@ -49,30 +50,29 @@ class PlaylistEngine:
         self.is_busy = True
         try:
             self.log("📡 Iniciando Sincronização Geral da Biblioteca...")
+            
+            # Inicializa a IA apenas uma vez se necessário
+            if not self.enricher:
+                self.enricher = MusicEnricher()
+                
             self.global_cleanup()
             
-            # Sincroniza todas as pastas de música no M:
+            # Sincroniza apenas pastas de música no M:
             music_root = config.get_path('MUSIC_ROOT')
             if os.path.exists(music_root):
                 subdirs = [d for d in os.listdir(music_root) if os.path.isdir(os.path.join(music_root, d))]
                 self.log(f"🔎 Buscando músicas em: {music_root}")
                 
-                system_folders = ['SAMPLES', 'INTERCOM', 'TEMPLATES', 'SETTINGS', '$RECYCLE.BIN', 'SYSTEM VOLUME INFORMATION']
+                system_folders = ['SAMPLES', 'INTERCOM', 'TEMPLATES', 'SETTINGS', '$RECYCLE.BIN', 'SYSTEM VOLUME INFORMATION', 'VHT - GERAÇÃO', 'VHT']
                 
                 for folder in subdirs:
                     if folder.upper() not in system_folders:
                         self.sync_folder_to_db(os.path.join(music_root, folder), folder.upper(), analyze=True)
             
-            # Sincroniza Vinhetas e Comerciais (Sem análise de áudio para ser rápido)
-            sweeper_root = config.get_path('SWEEPER_ROOT')
-            if os.path.exists(sweeper_root):
-                self.sync_folder_to_db(sweeper_root, 'VINHETA', analyze=False)
-                
-            commercial_root = config.get_path('COMMERCIAL_ROOT')
-            if os.path.exists(commercial_root):
-                self.sync_folder_to_db(commercial_root, 'COMERCIAL', analyze=False)
-
-            self.log("✅ Sincronização geral concluída!")
+            # Após o sync de arquivos, varre o banco para enriquecer o que ficou pendente
+            self.enrich_missing_data()
+            
+            self.log("✅ Sincronização de músicas concluída!")
         finally:
             self.is_busy = False
 
@@ -88,47 +88,62 @@ class PlaylistEngine:
         for index, f in enumerate(files):
             full_path = os.path.join(folder_path, f).replace('/', '\\')
             try:
-                cursor.execute("SELECT bpm, sub_categoria FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
+                cursor.execute("SELECT id, bpm, energy, valence, vibe FROM biblioteca WHERE caminho_arquivo = ?", (full_path,))
                 row = cursor.fetchone()
 
-                # Só analisa se for novo ou sem BPM (BPM=0)
-                if not row or (analyze and row[0] == 0):
-                    if analyze:
-                        self.log(f"[{index+1}/{total}] Analisando: {f}...")
-                        artists_list, title = self.parse_artist_title(f)
-                        artista = ", ".join(artists_list)
-                        
-                        # 1. Tenta Deezer
-                        bpm = bpm_service.get_bpm_from_deezer(artists_list[0], title)
-                        
-                        # 2. Fallback Local
-                        if not bpm or bpm == 0:
-                            bpm = bpm_service.get_bpm_locally(full_path)
-                        
-                        if bpm:
-                            self.log(f"🥁 BPM definido: {bpm}")
-                        
-                        duracao = self.get_audio_duration(full_path)
-                    else:
-                        artista = category
-                        title = f
-                        bpm = 0
-                        duracao = self.get_audio_duration(full_path)
+                # Processa se for novo OU se faltar dados de IA
+                if not row:
+                    self.log(f"[{index+1}/{total}] Novo arquivo: {f}")
+                    artists_list, title = self.parse_artist_title(f)
+                    artista = ", ".join(artists_list)
+                    duracao = self.get_audio_duration(full_path)
                     
                     ctime = os.path.getctime(full_path)
                     data_arquivo = dt.datetime.fromtimestamp(ctime).isoformat()
-                    subcat = row[1] if row else 'STD'
                     
+                    # Chamada DIRETA para a nossa IA de enriquecimento
+                    enrich_data = self.trigger_enrichment(full_path)
+                    
+                    # Se a IA retornou dados, usamos; caso contrário, usamos NULL
+                    bpm = enrich_data.get('bpm') if enrich_data else None
+                    energy = enrich_data.get('energy') if enrich_data else None
+                    valence = enrich_data.get('valence') if enrich_data else None
+                    vibe = enrich_data.get('vibe') if enrich_data else None
+
+                    if enrich_data and 'error' not in enrich_data:
+                        self.log(f"  ✨ IA: {bpm} BPM | Vibe: {vibe} | Energia: {energy}% | Valence: {valence}%")
+                    elif enrich_data and 'error' in enrich_data:
+                        self.log(f"  ⚠️ IA Erro: {enrich_data['error']}")
+
+                    # Insere no banco com todos os dados de inteligência
                     db.insert_music(
                         nome_musica=title,
                         artista=artista,
                         caminho_arquivo=full_path,
                         pasta_categoria=category,
-                        bpm=bpm,
+                        bpm=bpm, 
                         duracao=duracao,
-                        sub_categoria=subcat,
+                        energy=energy,
+                        valence=valence,
+                        vibe=vibe,
+                        sub_categoria='STD',
                         data_arquivo=data_arquivo
                     )
+                else:
+                    # Se o arquivo já existe, checamos se ele tem dados de IA completos
+                    tid, bpm, energy, valence, vibe = row
+                    if any(v in (None, 0) for v in (bpm, energy, valence, vibe)):
+                        self.log(f"[{index+1}/{total}] Completando dados de IA: {f}")
+                        success, result = self.enricher.enrich_track(tid)
+                        if success:
+                            self.log(f"  ✨ IA: {result['bpm']} BPM | Vibe: {result['vibe']} | Energia: {result['energy']}% | Valence: {result['valence']}%")
+                        else:
+                            self.log(f"  ⚠️ Falha: {result}")
+
+
+
+
+
             except Exception as e:
                 self.log(f"  [AVISO] Falha no arquivo '{f}': {e}")
 
@@ -139,21 +154,52 @@ class PlaylistEngine:
             parts = name_without_ext.split(' - ', 1)
             artist_part = parts[0].strip()
             title = parts[1].strip()
-            artists = [a.strip() for a in artist_part.replace(' e ', ' & ').split('&')]
+            
+            # Normaliza separadores de artistas
+            import re
+            # Substitui ' PART. ', ' FT. ', ' FEAT. ' por vírgula para split
+            artist_part = re.sub(r' (PART\.|FT\.|FEAT\.) ', ', ', artist_part, flags=re.IGNORECASE)
+            artists = [a.strip().upper() for a in artist_part.split(',')]
+            
             return artists, title
         return ["DESCONHECIDO"], name_without_ext
 
-    def get_audio_duration(self, filepath):
-        try:
-            from mutagen.mp3 import MP3
-            from mutagen.wave import WAVE
-            from mutagen.flac import FLAC
-            ext = os.path.splitext(filepath)[1].lower()
-            if ext == '.mp3': return int(MP3(filepath).info.length)
-            if ext == '.wav': return int(WAVE(filepath).info.length)
-            if ext == '.flac': return int(FLAC(filepath).info.length)
-        except: pass
-        return 0
+    def trigger_enrichment(self, filepath):
+        """Usa o MusicEnricher interno (IA persistente) para analisar a música."""
+        if not self.enricher:
+            self.enricher = MusicEnricher()
+        return self.enricher.analyze_path(filepath)
+
+    def enrich_missing_data(self):
+        """Varre o banco em busca de músicas que ainda não foram analisadas pela API."""
+        self.log("🔍 Buscando músicas sem dados de inteligência...")
+        cursor = db.conn.cursor()
+        # Busca músicas onde os campos de inteligência estão zerados ou nulos
+        cursor.execute("""
+            SELECT id, caminho_arquivo, artista, nome_musica 
+            FROM biblioteca 
+            WHERE (bpm IS NULL OR bpm = 0 OR energy IS NULL OR energy = 0 OR valence IS NULL OR valence = 0 OR vibe IS NULL OR vibe = 0)
+            LIMIT 200
+        """)
+        rows = cursor.fetchall()
+        
+        if not rows:
+            self.log("✨ Todas as músicas já possuem dados de inteligência.")
+            return
+
+        self.log(f"🚀 Enriquecendo {len(rows)} músicas pendentes...")
+        for row in rows:
+            tid, path, art, title = row
+            self.log(f"🧠 Analisando: {art} - {title}")
+            
+            # Usa o enriquecedor interno persistente
+            success, result = self.enricher.enrich_track(tid)
+            if success:
+                self.log(f"  ✨ Resumo: {result['bpm']} BPM | Vibe: {result['vibe']} | Energia: {result['energy']}% | Valence: {result['valence']}%")
+            else:
+                self.log(f"  [AVISO] Falha ao analisar {title}: {result}")
+        
+        self.log("✅ Enriquecimento de pendentes finalizado.")
 
     def get_audio_duration(self, filepath):
         try:
@@ -180,8 +226,11 @@ class PlaylistEngine:
             # Sobrescreve se houver algo específico no day_templates do config
             template_name = config.day_templates.get(str(weekday), template_name)
 
-            template_path = os.path.join(config.get_path('TEMPLATES'), template_name)
-            output_path = os.path.join(config.get_path('OUTPUT'), f"{date_str}.bil")
+            template_dir = config.get_path('MODELOS') or config.get_path('TEMPLATES')
+            output_dir = config.get_path('ROTEIROS') or config.get_path('OUTPUT')
+
+            template_path = os.path.join(template_dir, template_name)
+            output_path = os.path.join(output_dir, f"{date_str}.bil")
 
             if not os.path.exists(template_path):
                 self.log(f"❌ Erro: Modelo não encontrado: {template_path}")
@@ -193,7 +242,9 @@ class PlaylistEngine:
                 for line in f:
                     line = line.strip()
                     if len(line) >= 5 and line[2] == ':' and line[0].isdigit():
-                        valid_blocks.append(line.split()[0])
+                        time_str = line.split()[0]
+                        if time_str == "24:00": time_str = "00:00"
+                        valid_blocks.append(time_str)
 
             # Agendamento de músicas pagas (Apenas dias de semana)
             paid_reservations = {}
@@ -201,8 +252,11 @@ class PlaylistEngine:
                 self.log("📅 Agendando músicas pagas...")
                 for rule in config.paid_rules:
                     # rule é um dict: {"filename": "...", "start": "HH:MM", "end": "HH:MM"}
-                    start_t = dt.datetime.strptime(rule['start'], "%H:%M").time()
-                    end_t = dt.datetime.strptime(rule['end'], "%H:%M").time()
+                    start_str = rule['start'].replace("24:00", "00:00")
+                    end_str = rule['end'].replace("24:00", "00:00")
+                    
+                    start_t = dt.datetime.strptime(start_str, "%H:%M").time()
+                    end_t = dt.datetime.strptime(end_str, "%H:%M").time()
                     
                     candidates = []
                     for b in valid_blocks:
@@ -230,6 +284,8 @@ class PlaylistEngine:
                 # CABEÇALHO DE BLOCO (00:00 ...)
                 if raw_line[0].isdigit() and ':' in raw_line and len(raw_line.split()[0]) == 5:
                     current_block_time = raw_line.split()[0]
+                    if current_block_time == "24:00": current_block_time = "00:00"
+                    
                     final_lines.append(raw_line)
                     pending_paid = paid_reservations.get(current_block_time, [])[:]
                     continue
@@ -248,31 +304,69 @@ class PlaylistEngine:
                 # PROCESSAMENTO DE CATEGORIAS (.apm)
                 if ".apm" in raw_line.lower():
                     cat_part = raw_line.split(" ", 1)[0]
-                    cat = cat_part.upper().replace(".APM", "")
+                    cat = cat_part.replace(".apm", "").replace(".APM", "")
                     
-                    # Se tiver música paga pendente para este slot
-                    if pending_paid and not any(x in cat for x in ['VHT', 'CHAMADA', 'INTERCOM']):
+                    # Verifica se é uma variável customizada (Outro)
+                    is_custom = False
+                    for cv in config.custom_vars:
+                        if cv['name'].upper() == cat.upper():
+                            is_custom = True
+                            file_path, duration, tid = self.select_from_path(cv['path'], cat, current_block_time, date_str)
+                            break
+                    
+                    if is_custom:
+                        if file_path:
+                            final_lines.append(f"{file_path} /m:3000 /t:{duration} /i:0 /s:0 /f:{duration} /r:0 /d:0 /o:0 /n:1 /x:  /g:0")
+                        else:
+                            final_lines.append(raw_line)
+                        continue
+
+                    # Seleção de Vinheta
+                    if cat.upper() == "VINHETA":
+                        file_path, duration, tid = self.select_item("VINHETA", current_block_time, date_str)
+                        if file_path:
+                            final_lines.append(f"{file_path} /m:3000 /t:{duration} /i:0 /s:0 /f:{duration} /r:0 /d:0 /o:0 /n:1 /x:  /g:0")
+                        else:
+                            final_lines.append(raw_line)
+                        continue
+                        
+                    # Tratamento de MÚSICA com ou sem Sufixo (T, H, S, O)
+                    # Verifica se há música paga pendente
+                    if pending_paid:
                         paid_file = pending_paid.pop(0)
+                        self.log(f"  [{current_block_time}] ♻️ [PAID] {paid_file} (Substituindo {cat})")
                         full_path = os.path.join(config.get_path('MUSIC_ROOT'), 'ESPECIAL', paid_file).replace('/', '\\')
                         dur = self.get_audio_duration(full_path)
                         final_lines.append(f"{full_path} /m:3000 /t:{dur} /i:0 /s:0 /f:{dur} /r:0 /d:0 /o:0 /n:1 /x:  /g:0")
                         continue
 
-                    # Regra de Surpresa
-                    if cat == 'SERTANEJO B' and random.random() < 0.005:
-                        cat = 'SERTANEJO C'
+                    # Lógica de Sufixo
+                    real_cat = cat.upper()
+                    subcats_to_search = ['TOP', 'HIT', 'STD', 'OLD'] # Default se for pelado
+                    
+                    if "_" in real_cat:
+                        parts = real_cat.split("_", 1)
+                        real_cat = parts[0]
+                        letters = parts[1].upper()
+                        subcats_to_search = []
+                        if 'T' in letters: subcats_to_search.append('TOP')
+                        if 'H' in letters: subcats_to_search.append('HIT')
+                        if 'S' in letters: subcats_to_search.append('STD')
+                        if 'O' in letters: subcats_to_search.append('OLD')
+                        if not subcats_to_search: # Fallback se escrever algo inválido
+                             subcats_to_search = ['TOP', 'HIT', 'STD', 'OLD']
 
-                    # Seleção inteligente (BPM + Histórico)
-                    file_path, duration, tid = self.select_music("", cat, int(current_block_time[:2]))
+                    file_path, duration, tid = self.select_music("", real_cat, int(current_block_time[:2]), subcategory=subcats_to_search, block_time=current_block_time, date_str=date_str)
                     
                     if file_path:
                         # CARIMBA A EXECUÇÃO NO BANCO!
                         exec_time = f"{date_str} {current_block_time}:00"
-                        db.update_last_played(tid, exec_time)
+                        if tid:
+                            db.update_last_played(tid, exec_time)
                         
-                        # Se for vinheta ou intercom, usamos parâmetros diferentes ou duração zero
-                        is_special = any(x in cat for x in ['VHT', 'CHAMADA', 'INTERCOM', 'AMOSTRA'])
-                        m_val = "0" if is_special else "3000"
+                        # Se for vinheta ou intercom, usamos o mix padrão do app antigo (3000ms)
+                        # ou customizamos conforme necessário. O app antigo usava 3000 para tudo via generate_bil_line.
+                        m_val = "3000"
                         final_lines.append(f"{file_path} /m:{m_val} /t:{duration} /i:0 /s:0 /f:{duration} /r:0 /d:0 /o:0 /n:1 /x:  /g:0")
                     else:
                         final_lines.append(raw_line)
@@ -291,19 +385,84 @@ class PlaylistEngine:
         finally:
             self.is_busy = False
 
-    def select_music(self, folder_path, category, current_hour, subcategory=None):
+    def select_music(self, folder_path, category, current_hour, subcategory=None, block_time="00:00", date_str=None):
         """Seleciona a melhor música baseado no ritmo (BPM) e descanso."""
-        # Lógica de Surpresa (Wildcards)
-        if category in config.surprise_rules:
-            rule = config.surprise_rules[category]
-            if random.random() < rule['chance']:
-                self.log(f"🎲 SURPRESA: Ativando wildcard de {category} para {rule['surprise']}!")
-                return self.select_music("", rule['surprise'], current_hour)
-
-        candidate = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_bpm=self.last_bpm)
+        # Constrói o datetime simulado do bloco para cálculos de descanso corretos
+        simulated_now = None
+        if date_str:
+            try:
+                simulated_now = dt.datetime.strptime(f"{date_str} {block_time}", "%Y%m%d %H:%M")
+            except:
+                pass
+        
+        # Músicas normais precisam de descanso por tempo (4h)
+        candidate, score = db.get_best_candidate(category, current_hour, subcategory=subcategory, last_bpm=self.last_bpm, min_rest_hours=4, simulated_now=simulated_now)
         if candidate:
             full_path = candidate['caminho_arquivo']
+            track_id = candidate['id']
             self.last_bpm = candidate['bpm'] or 0
-            db.log_execution(full_path)
-            return full_path, self.get_audio_duration(full_path)
-        return None, 0
+            
+            track_name = os.path.basename(full_path)
+            self.log(f"  [{block_time}] 🎵 [{category}] {track_name} (Score: {int(score)})")
+            
+            db.log_execution(full_path, scheduled_time=simulated_now)
+            return full_path, self.get_audio_duration(full_path), track_id
+        
+        self.log(f"  [{block_time}] ⚠️ [{category}] Nenhuma música disponível que respeite os filtros.")
+        return None, 0, None
+
+    def select_item(self, category, block_time="00:00", date_str=None):
+        """Sorteia um item (vinheta, chamada, etc) direto da pasta global."""
+        simulated_now = None
+        if date_str:
+            try:
+                simulated_now = dt.datetime.strptime(f"{date_str} {block_time}", "%Y%m%d %H:%M")
+            except:
+                pass
+        
+        folder_path = config.get_path(category) # Vai buscar 'VINHETA' no config
+        return self.select_from_path(folder_path, category, block_time, date_str, simulated_now)
+
+    def select_from_path(self, folder_path, log_name, block_time="00:00", date_str=None, simulated_now=None):
+        """Lógica genérica para sortear um arquivo de um caminho de pasta ou injetar caminho direto"""
+        if not folder_path or not os.path.exists(folder_path): return None, 0, None
+        
+        # 1. Se for um arquivo direto, retorna ele mesmo
+        if os.path.isfile(folder_path):
+            full_path = folder_path.replace('/', '\\')
+            self.log(f"  [{block_time}] 🔈 [{log_name}] {os.path.basename(full_path)}")
+            ts = simulated_now
+            if not ts and date_str:
+                try:
+                    ts = dt.datetime.strptime(f"{date_str} {block_time}", "%Y%m%d %H:%M")
+                except:
+                    pass
+            db.log_execution(full_path, scheduled_time=ts)
+            return full_path, self.get_audio_duration(full_path), None
+
+        # 2. Se for um diretório, sorteia o item (evitando históricos)
+        files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav', '.flac'))]
+        if not files: return None, 0, None
+        
+        # Histórico de 3 slots (lê o histórico de caminhos do banco)
+        recent_tracks = db.get_recent_tracks(3)
+        
+        # Filtra candidatos que não estão nos últimos 3 slots
+        candidates = [f for f in files if os.path.join(folder_path, f).replace('/', '\\') not in recent_tracks]
+        
+        # Fallback se todos estiverem no histórico ou pasta for muito pequena
+        choice = random.choice(candidates if candidates else files)
+        full_path = os.path.join(folder_path, choice).replace('/', '\\')
+        
+        self.log(f"  [{block_time}] 🔈 [{log_name}] {choice}")
+        
+        ts = simulated_now
+        if not ts and date_str:
+            try:
+                ts = dt.datetime.strptime(f"{date_str} {block_time}", "%Y%m%d %H:%M")
+            except:
+                pass
+
+        db.log_execution(full_path, scheduled_time=ts)
+        
+        return full_path, self.get_audio_duration(full_path), None

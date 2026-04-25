@@ -112,6 +112,12 @@ h1 {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes slideInTop {
+  from { opacity: 0; transform: translate(-50%, -20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -323,3 +329,148 @@ audio {
 .badge-online { background: rgba(0, 255, 170, 0.15); color: #00ffaa; border: 1px solid #00ffaa; }
 .badge-busy { background: rgba(255, 170, 0, 0.15); color: #ffaa00; border: 1px solid #ffaa00; }
 .badge-error { background: rgba(255, 45, 85, 0.15); color: #ff2d55; border: 1px solid #ff2d55; }
+
+/* BLM Manager Styles */
+.marker-row {
+  background: rgba(0, 242, 255, 0.08) !important;
+  border-left: 4px solid var(--accent-color);
+}
+
+.blm-editor input:focus {
+  background: rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
+}
+
+.pulse {
+  animation: pulse-animation 2s infinite;
+}
+
+@keyframes pulse-animation {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.secondary-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: #fff;
+  padding: 0.8rem 1.2rem;
+  border-radius: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Tags and Lists */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.tag {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.tag button {
+  background: rgba(255, 68, 68, 0.1);
+  border: none;
+  color: #ff4444;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.tag button:hover {
+  background: rgba(255, 68, 68, 0.3);
+  transform: scale(1.1);
+}
+
+/* Action Buttons */
+.add-row-btn {
+  background: rgba(0, 242, 255, 0.1);
+  color: var(--accent-color);
+  border: 1px dashed var(--accent-color);
+  padding: 0.6rem 1.2rem;
+  border-radius: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s ease;
+  margin-top: 1rem;
+}
+
+.add-row-btn:hover {
+  background: rgba(0, 242, 255, 0.2);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(0, 242, 255, 0.15);
+}
+
+.remove-row-btn {
+  background: rgba(255, 68, 68, 0.05);
+  border: 1px solid rgba(255, 68, 68, 0.2);
+  color: #ff4444;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.remove-row-btn:hover {
+  background: rgba(255, 68, 68, 0.15);
+  transform: scale(1.1);
+}
+
+/* Toast Notification */
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent-color);
+  color: #000;
+  padding: 0.8rem 1.5rem;
+  border-radius: 30px;
+  font-weight: 700;
+  box-shadow: 0 4px 15px rgba(0,242,255,0.3);
+  z-index: 9999;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from { bottom: -2rem; opacity: 0; }
+  to { bottom: 2rem; opacity: 1; }
+}
+
+select option {
+  background-color: #1a1a2e;
+  color: #fff;
+  padding: 8px;
+}

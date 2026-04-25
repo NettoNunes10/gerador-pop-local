@@ -1,0 +1,17 @@
+# Configurações de Saída
+outputFormat: json
+indent: 2
+
+# Desligamos Tonal (que é lento) e IA externa (que dá erro)
+computeTonal: false
+computeRhythm: true
+
+# Ativamos o extrator de alto nível interno (apenas o que é nativo do .exe)
+# Isso evita o erro 'GaiaTransform'
+highlevel:
+  compute: 0
+
+# Garantimos que os descritores de baixo nível necessários estejam ativos
+lowlevel:
+  frameSize: 2048
+  hopSize: 1024

@@ -14,6 +14,8 @@ build/
 
 # Apps / DB (Opcional: Geralmente não enviamos a base de dados local)
 base_dados_radio.db
+base_dados_radio.db-shm
+base_dados_radio.db-wal
 settings.json
 log_geracao.txt
 
